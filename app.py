@@ -1,30 +1,39 @@
 import streamlit as st
 import google.generativeai as genai
 
-# Use 'gemini-1.5-flash' - it is the most stable across all keys
-MODEL_NAME = 'gemini-1.5-flash'
+# --- 1. SYSTEM RULES (Your 2-C, CI, MI logic) ---
+ROSTER_CONTEXT = """
+You are a Pro Dynasty GM. 
+Rules: 2-Catcher league, CI and MI slots required. 
+Strategy: Youth Pivot (2026-2028 window).
+"""
 
+# --- 2. THE CONNECTION ---
 try:
-    # 1. Pull the key from Streamlit Secrets
+    # Ensure the key is pulled from Secrets
     api_key = st.secrets["GEMINI_API_KEY"]
-    
-    # 2. Configure the connection
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(MODEL_NAME)
     
-    st.title("🧠 GM Reasoning Engine")
+    # FIXED: Using the full model path to prevent 404 errors
+    model = genai.GenerativeModel('models/gemini-1.5-flash')
     
-    # Simple test button to verify the key
-    if st.button("Verify Connection"):
-        test_response = model.generate_content("Hello")
-        st.success("Connection Successful!")
+    st.title("🧠 Dynasty Reasoning Engine")
+    
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-    if prompt := st.chat_input("Reason with me..."):
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]): st.write(m["content"])
+
+    if prompt := st.chat_input("Ask a strategy question..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user").write(prompt)
-        # Deep Reasoning Logic
-        response = model.generate_content(f"You are a Pro GM. Answer this: {prompt}")
-        st.chat_message("assistant").write(response.text)
         
+        # Deep Reasoning
+        response = model.generate_content(f"{ROSTER_CONTEXT}\nUser: {prompt}")
+        
+        st.session_state.messages.append({"role": "assistant", "content": response.text})
+        st.chat_message("assistant").write(response.text)
+
 except Exception as e:
-    # This will now tell us if the key is missing from Secrets vs. being 'invalid'
     st.error(f"Reasoning Engine Offline: {e}")
