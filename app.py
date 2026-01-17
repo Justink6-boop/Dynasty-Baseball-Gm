@@ -1,65 +1,69 @@
 import streamlit as st
 import pandas as pd
+import google.generativeai as genai
+import json
+import os
 
-# Set page config
-st.set_page_config(page_title="Dynasty Assistant GM", layout="wide")
+# --- INITIALIZATION & MEMORY ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "trade_log" not in st.session_state:
+    # Load permanent memory from a file
+    if os.path.exists("trade_history.json"):
+        with open("trade_history.json", "r") as f:
+            st.session_state.trade_log = json.load(f)
+    else:
+        st.session_state.trade_log = []
 
-# 1. DATABASE: League Rosters (From your PDF data)
-league_data = {
-    "Team Witness Protection": {
-        "Core": ["Ronald Acuna Jr.", "Spencer Strider", "Dylan Crews", "Jesus Made", "Colt Emerson"],
-        "Veterans": ["Marcell Ozuna", "J.T. Realmuto", "Max Fried", "Zach Eflin"],
-        "Pivots": ["Zach Neto", "Robby Snelling", "Dylan Beavers"]
-    },
-    "Bobbys Squad": {
-        "Core": ["Bobby Witt Jr.", "Gunnar Henderson", "Will Smith"],
-        "Assets": ["Tink Hence", "Jac Caglianone", "Chase Burns"]
-    },
-    "Happy": {
-        "Core": ["Juan Soto", "Julio Rodriguez", "Paul Skenes"],
-        "Assets": ["Jackson Holliday", "Wyatt Langford", "Ethan Salas"]
-    }
-}
+# --- CONFIG AI ENGINE ---
+# Set up Gemini to handle the reasoning
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 2. PROJECTION LOGIC: ZiPS/Steamer 2026 'Undervalued' Radar
-undervalued_targets = [
-    {"Player": "Kevin McGonigle", "Reason": "ZiPS Darling - Elite Hit Tool", "Target Team": "Arm Barn Heros"},
-    {"Player": "Bubba Chandler", "Reason": "High-Velocity SP projection", "Target Team": "ManBearPuig"},
-    {"Player": "Samuel Basallo", "Reason": "Statcast Power Elite for Catcher", "Target Team": "ManBearPuig"}
-]
+# --- UI LAYOUT ---
+st.set_page_config(page_title="Dynasty GM: Deep Assistant", layout="wide")
+st.title("🧠 Professional GM Reasoning Engine")
 
-# --- APP UI ---
-st.title("⚾ Dynasty Assistant GM: Rebuild Mode")
-st.sidebar.header("Navigation")
-page = st.sidebar.selectbox("Choose a Module", ["Roster Analysis", "Trade Generator", "Sleeper Radar"])
-
-if page == "Roster Analysis":
-    st.subheader("Team Witness Protection: Organizational Windows")
-    col1, col2 = st.columns(2)
+# SIDEBAR: Permanent League Knowledge
+with st.sidebar:
+    st.header("📜 League Transaction Log")
+    for idx, trade in enumerate(st.session_state.trade_log):
+        st.info(f"Trade {idx+1}: {trade}")
     
-    with col1:
-        st.write("### ✅ Core Youth Assets")
-        st.success(", ".join(league_data["Team Witness Protection"]["Core"]))
-        
-    with col2:
-        st.write("### ⚠️ Suggested Trade Exits (Aging Assets)")
-        st.warning(", ".join(league_data["Team Witness Protection"]["Veterans"]))
-    
-    st.info("Strategy: You are in a 'Hard Pivot.' Sell veterans to Contenders for 'Cusp' prospects.")
+    if st.button("Clear Log"):
+        st.session_state.trade_log = []
+        if os.path.exists("trade_history.json"): os.remove("trade_history.json")
+        st.rerun()
 
-elif page == "Trade Generator":
-    st.subheader("Mock Trade Ideas (Contextual Strategy)")
-    
-    st.write("#### 🤝 Scenario 1: The SS Logjam Flip")
-    st.write("**Give:** Zach Neto + Max Fried")
-    st.write("**Get:** Jackson Jobe (DET, SP) + Bubba Chandler (PIT, SP)")
-    st.markdown("*Logic: Capitalize on your SS depth to fix your pitching age-curve.*")
-    
-    st.write("#### 🤝 Scenario 2: The Veteran Dump")
-    st.write("**Give:** Marcell Ozuna + J.T. Realmuto")
-    st.write("**Get:** Kevin McGonigle (DET, SS) + 2026 1st Round Pick")
-    st.markdown("*Logic: Move high-production, low-trade-value assets to a win-now team like 'Happy'.*")
+# --- CHAT INTERFACE ---
+# Display historical messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-elif page == "Sleeper Radar":
-    st.subheader("2026 ZiPS/Steamer Undervalued Radar")
-    st.table(pd.DataFrame(undervalued_targets))
+# User Query Input
+if prompt := st.chat_input("Ask about a trade, or report a league move..."):
+    # 1. Display user message
+    st.chat_message("user").markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # 2. Reasoning Logic
+    # We provide the AI with your roster and history for context
+    context = f"My Team: Witness Protection (Core: Acuna, Strider, Crews, Made, Emerson). " \
+              f"League History: {st.session_state.trade_log}. " \
+              f"User Question: {prompt}"
+    
+    with st.spinner("Assistant is reasoning..."):
+        response = model.generate_content(context)
+        ai_response = response.text
+
+    # 3. Detect if a trade happened and save it
+    if "traded" in prompt.lower() or "deal" in prompt.lower():
+        st.session_state.trade_log.append(prompt)
+        with open("trade_history.json", "w") as f:
+            json.dump(st.session_state.trade_log, f)
+
+    # 4. Display AI response
+    with st.chat_message("assistant"):
+        st.markdown(ai_response)
+    st.session_state.messages.append({"role": "assistant", "content": ai_response})
