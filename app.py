@@ -1,39 +1,29 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- 1. SYSTEM RULES (Your 2-C, CI, MI logic) ---
-ROSTER_CONTEXT = """
-You are a Pro Dynasty GM. 
-Rules: 2-Catcher league, CI and MI slots required. 
-Strategy: Youth Pivot (2026-2028 window).
-"""
+st.title("🧠 Dynasty GM: Reasoning Engine")
 
-# --- 2. THE CONNECTION ---
 try:
-    # Ensure the key is pulled from Secrets
-    api_key = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=api_key)
+    # 1. Setup Connection
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
-    # FIXED: Using the full model path to prevent 404 errors
-    model = genai.GenerativeModel('models/gemini-1.5-flash')
+    # 2. Scanner (To find the right model name for your region)
+    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
     
-    st.title("🧠 Dynasty Reasoning Engine")
+    # We try the most stable one first
+    target_model = 'models/gemini-1.5-flash' if 'models/gemini-1.5-flash' in available_models else available_models[0]
     
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    model = genai.GenerativeModel(target_model)
+    st.success(f"Connected to: {target_model}")
 
-    for m in st.session_state.messages:
-        with st.chat_message(m["role"]): st.write(m["content"])
-
-    if prompt := st.chat_input("Ask a strategy question..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        st.chat_message("user").write(prompt)
-        
-        # Deep Reasoning
-        response = model.generate_content(f"{ROSTER_CONTEXT}\nUser: {prompt}")
-        
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
+    # 3. Reasoning Interface
+    if p := st.chat_input("Reason with me..."):
+        st.chat_message("user").write(p)
+        # Deep Reasoning Logic
+        context = "Rules: 2-Catcher, CI, MI slots. Rebuilding strategy."
+        response = model.generate_content(f"{context}\nUser: {p}")
         st.chat_message("assistant").write(response.text)
-
+        
 except Exception as e:
     st.error(f"Reasoning Engine Offline: {e}")
+    st.write("Check if 'Generative Language API' is enabled in your Google Cloud Console.")
