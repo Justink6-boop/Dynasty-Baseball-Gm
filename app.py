@@ -6,7 +6,6 @@ import google.generativeai as genai
 ROSTER_RULES = """
 League Configuration:
 - Starting Lineup: 2 Catchers (C), 1B, 2B, 3B, SS, Corner Infield (CI), Middle Infield (MI), 3 OF, 2 UTIL.
-- Scoring: [Insert your specific scoring points here for R, HR, RBI, SB, OBP, etc.]
 - Strategy: We are in a 'Hard Pivot' to youth. Target windows: 2026-2028.
 """
 
@@ -19,7 +18,7 @@ if "messages" not in st.session_state:
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     # FIXED MODEL NAME: Using 'gemini-1.5-flash' to avoid 404 errors
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
     st.error(f"Setup Error: {e}")
 
@@ -50,7 +49,6 @@ if prompt := st.chat_input("Ask about a trade, strategy, or roster depth..."):
     # Prepare the context for the AI
     # We include rules + history so it 'reasons' with context
     context = f"System Rules: {ROSTER_RULES}\n"
-    # (Optional: Add your roster from the PDF here too)
     
     with st.spinner("Analyzing league depth and scoring..."):
         try:
