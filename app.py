@@ -2,66 +2,65 @@ import streamlit as st
 import pandas as pd
 import google.generativeai as genai
 
-# --- 1. CONFIGURATION & ROSTER RULES ---
-# Custom Lineup Requirements: 2 C, 1B, 2B, 3B, SS, CI, MI, 3+ OF, UTIL
-LINEUP_RULES = """
-Lineup Slots: 2 Catchers, 1B, 2B, 3B, SS, Corner Infielder (1B/3B), 
-Middle Infielder (2B/SS), 3 Outfielders, 2 Utility.
+# --- 1. SETTINGS & ROSTER RULES ---
+ROSTER_RULES = """
+League Configuration:
+- Starting Lineup: 2 Catchers (C), 1B, 2B, 3B, SS, Corner Infield (CI), Middle Infield (MI), 3 OF, 2 UTIL.
+- Scoring: [Insert your specific scoring points here for R, HR, RBI, SB, OBP, etc.]
+- Strategy: We are in a 'Hard Pivot' to youth. Target windows: 2026-2028.
 """
 
-# --- 2. THE LEAGUE BRAIN (From your PDF) ---
-# This dictionary now acts as the 'Source of Truth' for the AI
-league_db = {
-    "Team Witness Protection": ["Ronald Acuna Jr.", "Spencer Strider", "Dylan Crews", "Jesus Made", "Colt Emerson", "J.T. Realmuto", "Dillon Dingler"],
-    "Bobbys Squad": ["Bobby Witt Jr.", "Gunnar Henderson", "Pete Alonso", "Josh Naylor", "Chase Burns"],
-    "Happy": ["Juan Soto", "Julio Rodriguez", "Paul Skenes", "Jackson Holliday", "Ethan Salas"]
-}
+# --- 2. INITIALIZE AI & MEMORY ---
+# Initialize chat history if it doesn't exist
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# --- 3. AI REASONING SETUP ---
+# Connect to Gemini
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    # FIXED MODEL NAME: Using 'gemini-1.5-flash' to avoid 404 errors
+    model = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
-    st.error("API Key missing. Add GEMINI_API_KEY to Streamlit Secrets.")
+    st.error(f"Setup Error: {e}")
 
-# --- 4. APP UI ---
-st.set_page_config(page_title="Dynasty Executive Assistant", layout="wide")
+# --- 3. UI LAYOUT ---
+st.set_page_config(page_title="Executive GM Assistant", layout="wide")
 st.title("🧠 Dynasty Executive Assistant GM")
 
-# Sidebar: Transaction History
-if "trades" not in st.session_state: st.session_state.trades = []
+# Sidebar: Display Roster Rules for reference
 with st.sidebar:
-    st.header("📝 League Transaction Log")
-    new_move = st.text_input("Report a move (e.g., 'Happy traded Soto to Guti Gang')")
-    if st.button("Log Transaction"):
-        st.session_state.trades.append(new_move)
-    for t in st.session_state.trades: st.caption(f"✅ {t}")
+    st.header("📋 Roster Rules")
+    st.markdown(ROSTER_RULES)
+    if st.button("Clear Chat History"):
+        st.session_state.messages = []
+        st.rerun()
 
-# MAIN INTERFACE: Trade Grader & Reasoner
-st.subheader("Trade Evaluation & Strategy Reasoning")
-trade_query = st.text_area("Describe a potential trade or ask a strategy question:", 
-                          placeholder="Example: Should I trade J.T. Realmuto for a 1st rounder and a young CI?")
+# --- 4. THE REASONING INTERFACE ---
+# Display existing chat messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-if st.button("Analyze Trade"):
-    # The 'Professional GM' Prompt
-    full_prompt = f"""
-    You are a Pro Dynasty GM. 
-    League Rules: {LINEUP_RULES}. 
-    My Team (Witness Protection): {league_db['Team Witness Protection']}.
-    Recent League Moves: {st.session_state.trades}.
-    User Question: {trade_query}
+# Chat Input Box
+if prompt := st.chat_input("Ask about a trade, strategy, or roster depth..."):
+    # Display user message
+    st.chat_message("user").markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Prepare the context for the AI
+    # We include rules + history so it 'reasons' with context
+    context = f"System Rules: {ROSTER_RULES}\n"
+    # (Optional: Add your roster from the PDF here too)
     
-    INSTRUCTIONS:
-    1. Grade the trade (A-F).
-    2. Analyze the 'Positional Scarcity' (we must start 2 Catchers and a CI/MI).
-    3. Determine if it fits our 'Youth Pivot' strategy.
-    4. Provide a 'Verdict' on whether to accept, decline, or counter.
-    """
-    
-    with st.spinner("Reasoning through roster impact..."):
+    with st.spinner("Analyzing league depth and scoring..."):
         try:
-            response = model.generate_content(full_prompt)
-            st.markdown("---")
-            st.markdown(response.text)
+            # Generate response
+            response = model.generate_content(f"{context}\nUser: {prompt}")
+            ai_text = response.text
+            
+            # Display assistant response
+            with st.chat_message("assistant"):
+                st.markdown(ai_text)
+            st.session_state.messages.append({"role": "assistant", "content": ai_text})
         except Exception as e:
-            st.error(f"Error connecting to reasoning engine: {e}")
+            st.error(f"Error: {e}")
