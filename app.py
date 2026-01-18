@@ -11,7 +11,7 @@ import time
 import difflib
 import re
 import ast
-import asyncio # NEW: For Parallel Processing
+import asyncio 
 
 # --- 1. GLOBAL MASTER CONFIGURATION ---
 SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A"
@@ -24,7 +24,6 @@ TEAM_NAMES = [
 
 # --- 2. CORE UTILITY ENGINE (CACHED) ---
 def get_gspread_client():
-    """Secure connection to Google Sheets."""
     info = dict(st.secrets["gcp_service_account"])
     key = info["private_key"].replace("\\n", "\n")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -32,14 +31,12 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def convert_df_to_excel(df):
-    """Generates binary Excel file."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False)
     return output.getvalue()
 
 def flatten_roster_to_df(league_data):
-    """Converts horizontal roster to vertical sortable DataFrame."""
     flat_data = []
     for team, players in league_data.items():
         current_cat = "Unknown"
@@ -65,7 +62,6 @@ def get_active_model():
     except: return genai.GenerativeModel('gemini-1.5-flash')
 
 async def async_call_openrouter(model_id, persona, prompt):
-    """Async wrapper for OpenRouter to allow parallel calls."""
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}", "HTTP-Referer": "https://streamlit.io"}
     data = {"model": model_id, "messages": [{"role": "system", "content": persona}, {"role": "user", "content": prompt}]}
@@ -76,20 +72,48 @@ async def async_call_openrouter(model_id, persona, prompt):
     except Exception as e: return f"Error: {e}"
 
 async def async_run_gm_analysis(query, league_data, intel_data, task="Trade"):
-    """Runs ALL agents in parallel. Total time = time of slowest agent."""
-    mandate = "REALISM GATE: Elite Youth > Aging Vets. Scout ALL 4 Ais."
+    """
+    UPGRADED WAR ROOM:
+    1. Forces live research of Dynasty Rankings/ZiPS.
+    2. Implements a 'Trade Value Calculator' mental model.
+    """
     
-    # 1. Research Phase (Blocking - needed for context)
-    with st.spinner(f"📡 War Room: {task} Protocol (Phase 1: Intel)..."):
-        search_res = await async_call_openrouter("perplexity/sonar", "Lead Sabermetrician.", f"Jan 2026 ZiPS and values for: {query}")
+    # 1. RESEARCH PHASE: Aggressively hunt for VALUES, not just stats.
+    search_prompt = f"""
+    Search for CURRENT Dynasty Baseball Trade Values and 2026 ZiPS Projections for: {query}.
+    Find specific rankings (e.g. "Top 10 Dynasty SP" or "Top 50 Prospects").
+    Look for "Dynasty League Baseball" or "Fangraphs" trade charts.
+    """
     
-    brief = f"ROSTERS: {league_data}\nINTEL: {intel_data}\nRESEARCH: {search_res}\nQUERY: {query}\nMANDATE: {mandate}"
+    with st.spinner(f"📡 War Room: {task} Protocol (Phase 1: Live Value Check)..."):
+        # We use Perplexity to get the REAL rankings, preventing hallucinations
+        search_res = await async_call_openrouter("perplexity/sonar", "Lead Scout.", search_prompt)
     
-    # 2. Council Phase (Parallel)
-    with st.spinner("⚔️ Council Deliberating (Parallel Processing)..."):
+    # 2. THE REALISM MANDATE
+    mandate = """
+    ROLE: You are a Hard-Nosed Dynasty Trade Calculator.
+    
+    CRITICAL RULES:
+    1. **IGNORE NAME VALUE**. Focus ONLY on 3-Year Projection Windows (2026-2028).
+    2. **REALISM CHECK**: 
+       - If User trades an Aging Vet (e.g. Max Fried) for Elite Youth (e.g. Skenes/Chourio), REJECT IT IMMEDIATELY. Label it "Fleecing/Impossible".
+       - Trade Value must be within 15% to be "Fair".
+    3. **SOURCES**: Base valuations on Fangraphs Auction Calculator logic and current Dynasty Consensus Rankings.
+    
+    FORMAT:
+    - **Trade Grade**: (0-100 Scale for fairness)
+    - **Winner**: (User or Opponent)
+    - **Realism**: (Realistic / Lopsided / Fantasy Land)
+    - **Analysis**: Use ZiPS/Steamer references.
+    """
+    
+    brief = f"ROSTERS: {league_data}\nINTEL: {intel_data}\nLIVE RANKINGS: {search_res}\nQUERY: {query}\nMANDATE: {mandate}"
+    
+    # 3. PARALLEL EXECUTION
+    with st.spinner("⚔️ Calculating Trade Values (Parallel Processing)..."):
         task_gemini = asyncio.to_thread(get_active_model().generate_content, f"Lead GM Verdict. {brief}")
-        task_gpt = async_call_openrouter("openai/gpt-4o", "Market Expert.", brief)
-        task_claude = async_call_openrouter("anthropic/claude-3.5-sonnet", "Strategist.", brief)
+        task_gpt = async_call_openrouter("openai/gpt-4o", "Market Expert (Fangraphs Logic).", brief)
+        task_claude = async_call_openrouter("anthropic/claude-3.5-sonnet", "Strategist (Dynasty Focus).", brief)
         
         res_gemini, res_gpt, res_claude = await asyncio.gather(task_gemini, task_gpt, task_claude)
         
@@ -101,7 +125,6 @@ async def async_run_gm_analysis(query, league_data, intel_data, task="Trade"):
     }
 
 def run_fast_analysis(query, league_data, intel_data, task):
-    """Wrapper to run async analysis from sync Streamlit."""
     return asyncio.run(async_run_gm_analysis(query, league_data, intel_data, task))
 
 def organize_roster_ai(player_list):
@@ -254,13 +277,17 @@ def get_fuzzy_matches(input_names, team_players):
     return results
 
 def analyze_and_save_block(image_files, user_roster, intel_data, sh):
-    """Extracts, Grades, and Saves to Trade Block."""
+    """Extracts, Grades, and Saves to Trade Block using ZiPS/Fangraphs Criteria."""
     model = get_active_model()
     prompt = f"""
     You are an Expert Dynasty GM. MY ROSTER: {user_roster}. INTEL: {intel_data}. GOAL: Win 2027.
+    
+    CRITICAL SOURCE REQUIREMENT:
+    - Base grades on 2026 ZiPS Projections and Fangraphs Dynasty Rankings.
+    - Be HARSH. "A" Grades are reserved for Top 50 Dynasty Assets.
+    
     TASK: Analyze screenshots. Return JSON list:
     [{{"Team": "...", "Player": "...", "Position": "...", "Grade": "A-F", "Verdict": "PURSUE/PASS", "Impact_Pct": "+5%", "Outlook_Shift": "...", "Analysis": "..."}}]
-    CRITICAL: ALWAYS include Grade.
     """
     content = [prompt] + [Image.open(f) for f in image_files]
     with st.spinner("👀 Calculating Analytics..."):
@@ -296,7 +323,7 @@ def load_league_data():
 
 # --- 7. MAIN APP UI ---
 st.set_page_config(page_title="GM Master Terminal", layout="wide", page_icon="⚡")
-st.title("⚡ Dynasty GM Suite: Speedster Edition")
+st.title("⚡ Dynasty GM Suite: Realism Edition")
 
 try:
     # Load Data (Cached)
@@ -323,8 +350,8 @@ try:
 
     with tabs[0]: # TERMINAL
         st.subheader("Official Sync Terminal")
-        tm, tv = st.tabs(["Manual", "Vision"])
-        with tm:
+        tab_man, tab_vis = st.tabs(["Manual", "Vision"])
+        with tab_man:
             c1, c2 = st.columns(2)
             with c1: ta = st.selectbox("Team A:", TEAM_NAMES, key="m_ta"); pa = st.text_area("Giving:", key="m_pa")
             with c2: tb = st.selectbox("Team B:", TEAM_NAMES, key="m_tb"); pb = st.text_area("Giving:", key="m_pb")
@@ -334,7 +361,7 @@ try:
                 if any(x.get('row') == -1 for x in ma+mb): st.error("Check spelling.")
                 else: verify_trade_dialog(ta, ma, tb, mb, roster_ws_live, history_ws_live, raw_matrix, sh_live)
 
-        with tv:
+        with tab_vis:
             up_img = st.file_uploader("Upload Trade Screenshot", type=["jpg","png"])
             if up_img:
                 raw = parse_trade_screenshot(up_img, TEAM_NAMES)
@@ -349,18 +376,27 @@ try:
                         if any(x.get('row') == -1 for x in ma+mb): st.error("Match failed.")
                         else: verify_trade_dialog(ta_v, ma, tb_v, mb, roster_ws_live, history_ws_live, raw_matrix, sh_live)
 
-    with tabs[1]: # ANALYSIS (FAST)
+    with tabs[1]: # ANALYSIS (REALISM ENGINE)
+        st.info("💡 Powered by Fangraphs Auction Calculator Logic & ZiPS 2026")
         q = st.chat_input("Analyze trade...")
         if q:
             res = run_fast_analysis(q, json.dumps(full_league_data), intel_text, "Trade")
             st.write(res["Research"])
             c1, c2 = st.columns(2); c1.info("Verdict"); c1.write(res["Gemini"]); c2.info("Strategy"); c2.write(res["Claude"])
 
-    with tabs[2]: # FINDER (FAST)
+    with tabs[2]: # FINDER (EXPANDED)
         c1, c2 = st.columns(2)
-        with c1: t = st.selectbox("Target:", ["Prospects", "2026 SP", "Draft Capital"])
-        with c2: o = st.text_input("Offer:")
-        if st.button("Scour League"): st.write(run_fast_analysis(f"Get {t} for {o}", json.dumps(full_league_data), intel_text, "Finder")["Gemini"])
+        with c1: 
+            # UPGRADED FINDER OPTIONS
+            t = st.selectbox("I need:", [
+                "Elite Prospects (Top 100)", 
+                "MLB-Ready Youth (<24yo)", 
+                "Win-Now Veterans (High Floor)", 
+                "Buy-Low Candidates (Post-Hype)", 
+                "2026 SP Help"
+            ])
+        with c2: o = st.text_input("Offering:")
+        if st.button("Scour League"): st.write(run_fast_analysis(f"Find trades to get {t} for {o}. Use Dynasty Rankings.", json.dumps(full_league_data), intel_text, "Finder")["Gemini"])
 
     with tabs[3]: # INTEL
         st.subheader("🕵️ League Intel")
