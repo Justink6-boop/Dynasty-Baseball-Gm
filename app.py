@@ -25,7 +25,6 @@ SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A"
 
 # --- 2. MASTER LEAGUE REFERENCE DATA ---
 def get_initial_league():
-    # ... (Your full dictionary remains here as provided in your prompt)
     return {
         "Witness Protection (Me)": {"Catchers": ["Dillon Dingler", "J.T. Realmuto"], "Infielders": ["Jake Cronenworth (2B)", "Ke'Bryan Hayes (3B)", "Caleb Durbin (3B)", "Luisangel Acuna (2B)", "Ceddanne Rafaela (2B, OF)", "Michael Massey (2B)", "Ivan Herrera (UT)", "Enrique Hernandez (1B, 3B, OF)", "Yandy Diaz (1B)", "Wilmer Flores (1B)", "Jeff McNeil (2B, OF)", "Andy Ibanez (3B)"], "Outfielders": ["Ronald Acuna Jr.", "Dylan Beavers", "JJ Bleday", "Dylan Crews", "Byron Buxton", "lan Happ", "Tommy Pham", "Jacob Young", "Marcell Ozuna (UT)", "Justice Bigbie", "Alex Verdugo"], "Pitchers": ["Dylan Cease", "Jack Flaherty", "Max Fried", "Cristopher Sanchez", "Spencer Strider", "Pete Fairbanks", "Daysbel Hernandez", "Brant Hurter", "Blake Treinen", "Merrill Kelly", "Yimi Garcia", "Jordan Hicks", "Bryan King", "Alex Lange", "Shelby Miller", "Evan Phillips", "Yu Darvish", "Reynaldo Lopez", "Drue Hackenberg"], "Draft Picks": ["2026 Pick 1.02"]},
         "Bobbys Squad": {"Catchers": ["Drake Baldwin", "Will Smith", "Ryan Jeffers", "Sean Murphy", "Carter Jensen"], "Infielders": ["Pete Alonso (1B)", "Josh Naylor (1B)", "Xavier Edwards (2B, SS)", "Maikel Garcia (3B)", "Bobby Witt Jr. (SS)", "Gunnar Henderson (SS)", "Ronny Mauricio (3B)", "Colt Keith (2B, 3B)", "Brooks Lee (2B, 3B, SS)", "Tommy Edman (2B, OF)", "Nolan Arenado (3B)", "Cam Collier (1B, 3B)", "Ralphy Velazquez (1B)", "Jacob Berry (2B, 3B, OF)", "Blaze Jordan (1B, 3B)", "Brayden Taylor (2B, 3B)", "Josuar Gonzalez (SS)", "Elian Pena (SS)", "Cooper Pratt (SS)"], "Outfielders": ["Kerry Carpenter", "Drew Gilbert", "Wenceel Perez", "Tyler Soderstrom (1B/OF)", "Brent Rooker (UT)", "Jacob Wilson (SS)", "Jac Caglianone", "Jasson Dominguez", "Jake Mangum", "Luis Robert Jr.", "Kyle Stowers", "Zyhir Hope", "Spencer Jones"], "Pitchers": ["Logan Gilbert", "Aroldis Chapman", "Camilo Doval", "Lucas Erceg", "Carlos Estevez", "Kyle Finnegan", "Ronny Henriquez", "Tony Santillan", "Tanner Scott", "Cade Cavalli", "Dustin May", "Aaron Nola", "Eury Perez", "Ranger Suarez", "Trevor Megill", "Chase Burns", "Jacob Lopez", "Boston Bateman", "Tink Hence", "Chase Petty", "Brett Wichrowski", "Trey Yesavage"], "Draft Picks": ["2026 Pick 1.05"]},
@@ -67,35 +66,40 @@ try:
     best_model = [m for m in models if 'flash' in m][0] if [m for m in models if 'flash' in m] else models[0]
     model = genai.GenerativeModel(best_model)
 
-    # D. SHARED GM BRAIN (Define BEFORE Multi-AI)
+    # D. SHARED GM BRAIN
     def get_gm_advice(category, user_input=""):
-        context = f"""
-        LIVE_ROSTERS: {raw_roster_matrix}
-        HISTORY: {permanent_history}
-        METRICS: ZiPS/FanGraphs Dynasty Fit (2026-28 Window)
-        TASK: {category}
-        """
+        context = f"LIVE_ROSTERS: {raw_roster_matrix}\nMETRICS: ZiPS/FanGraphs Dynasty\nTASK: {category}"
         return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Report'}").text
 
     # E. MULTI-AI WAR ROOM BRAIN
     def get_multi_ai_opinions(user_trade):
         context = f"LIVE_ROSTERS: {raw_roster_matrix}\nTRADE: {user_trade}"
         opinions = {}
-        # Gemini
+        
+        # GM 1: Gemini (Standard)
         opinions['Gemini'] = get_gm_advice("ZiPS Statistical Analysis", user_trade)
-        # OpenRouter (GPT, Claude, Perplexity)
+
         if "OPENROUTER_API_KEY" in st.secrets:
-            def call_or(m, p):
+            def call_or(m_name, persona):
                 try:
-                    r = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}"},
-                        data=json.dumps({"model": m, "messages": [{"role":"system","content":p}, {"role":"user","content":context}]}))
-                    return r.json()['choices'][0]['message']['content']
+                    # Fallback list for resilience
+                    try_list = [m_name, "google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.1-8b-instruct:free"]
+                    for m in try_list:
+                        r = requests.post(
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}", "HTTP-Referer": "https://streamlit.io"},
+                            data=json.dumps({"model": m, "messages": [{"role":"system","content":persona}, {"role":"user","content":context}]}),
+                            timeout=10)
+                        if r.status_code == 200:
+                            return r.json()['choices'][0]['message']['content']
+                    return "GM Busy."
                 except: return "GM Offline."
-            
-            opinions['ChatGPT'] = call_or("openai/gpt-4o", "Aggressive Dynasty GM focused on hype.")
-            opinions['Claude'] = call_or("anthropic/claude-3-opus", "Conservative Strategist focused on injury risk.")
-            opinions['Perplexity'] = call_or("perplexity/sonar-reasoning", "Data Researcher focused on Statcast trends.")
+
+            # CALLING THE GMs
+            opinions['ChatGPT'] = call_or("openai/gpt-4o", "Aggressive GM focused on market value.")
+            opinions['Claude'] = call_or("anthropic/claude-3-opus", "Conservative strategist focused on injury risk.")
+            opinions['Perplexity'] = call_or("perplexity/sonar-reasoning", "Data researcher focused on Statcast trends.")
+        
         return opinions
 
     # --- 4. SIDEBAR ---
@@ -104,7 +108,7 @@ try:
         spent = st.number_input("Log Spending:", min_value=0.0)
         if st.button("Update Budget"): st.session_state.faab -= spent
         st.divider()
-        st.info("💡 Logging must be done in the Transaction Terminal.")
+        st.info("💡 Transactions must be logged in the first tab.")
 
     # --- 5. THE EXECUTIVE SUITE TABS ---
     tabs = st.tabs([
@@ -120,18 +124,18 @@ try:
     # --- TAB 0: TRANSACTION TERMINAL ---
     with tabs[0]:
         st.subheader("Official League Transaction Terminal")
-        trans_type = st.radio("Select Action:", ["Trade", "Waiver/Drop"], horizontal=True)
+        trans_type = st.radio("Action:", ["Trade", "Waiver/Drop"], horizontal=True)
         if trans_type == "Trade":
             col1, col2 = st.columns(2)
             with col1:
-                team_a = st.selectbox("From Team:", team_list, key="ta_term")
-                players_out = st.text_area("Leaving Team A:", key="out_term")
+                team_a = st.selectbox("From Team:", team_list, key="ta")
+                p_out = st.text_area("Leaving Team A:", key="po")
             with col2:
-                team_b = st.selectbox("To Team:", team_list, key="tb_term")
-                players_in = st.text_area("Leaving Team B:", key="in_term")
+                team_b = st.selectbox("To Team:", team_list, key="tb")
+                p_in = st.text_area("Leaving Team B:", key="pi")
             if st.button("Execute Trade"):
-                with st.spinner("Syncing..."):
-                    prompt = f"DATA: {raw_roster_matrix}\nMove {players_out} A->B, {players_in} B->A. Return ONLY Python list of lists."
+                with st.spinner("Updating Sheets..."):
+                    prompt = f"DATA: {raw_roster_matrix}\nMove {p_out} A->B, {p_in} B->A. Return ONLY Python list of lists."
                     res = model.generate_content(prompt).text
                     clean = res.replace("```python", "").replace("```", "").strip()
                     try:
@@ -145,26 +149,25 @@ try:
         else:
             col1, col2 = st.columns(2)
             with col1:
-                t_team = st.selectbox("Team:", team_list)
-                act = st.selectbox("Action:", ["Add", "Drop"])
-            with col2: p_name = st.text_input("Player Name:")
+                t_team = st.selectbox("Team:", team_list, key="wt")
+                act = st.selectbox("Action:", ["Add", "Drop"], key="wa")
+            with col2: p_name = st.text_input("Player Name:", key="wp")
             if st.button("Submit Move"):
-                with st.spinner("Updating..."):
-                    prompt = f"DATA: {raw_roster_matrix}\n{act} {p_name} to/from {t_team}. Return ONLY Python list."
-                    res = model.generate_content(prompt).text
-                    clean = res.replace("```python", "").replace("```", "").strip()
-                    try:
-                        new_list = eval(clean)
-                        roster_ws.clear()
-                        roster_ws.update(new_list)
-                        history_ws.append_row([f"{act.upper()}: {p_name} ({t_team})"])
-                        st.rerun()
-                    except: st.error("Format Error.")
+                prompt = f"DATA: {raw_roster_matrix}\n{act} {p_name} to/from {t_team}. Return ONLY Python list."
+                res = model.generate_content(prompt).text
+                clean = res.replace("```python", "").replace("```", "").strip()
+                try:
+                    new_list = eval(clean)
+                    roster_ws.clear()
+                    roster_ws.update(new_list)
+                    history_ws.append_row([f"{act.upper()}: {p_name} ({t_team})"])
+                    st.rerun()
+                except: st.error("Format Error.")
 
-    # --- TAB 1: WAR ROOM ANALYSIS ---
+    # --- TAB 1: WAR ROOM ---
     with tabs[1]:
         st.subheader("OOTP War Room: Multi-AI Consensus")
-        trade_q = st.chat_input("Enter trade details...")
+        trade_q = st.chat_input("Enter trade details (e.g. 'Fried for Skenes')...")
         if trade_q:
             results = get_multi_ai_opinions(trade_q)
             c1, c2 = st.columns(2)
@@ -172,12 +175,12 @@ try:
                 st.info("🟢 Gemini (Scout)")
                 st.write(results.get('Gemini'))
                 st.info("🔵 ChatGPT (Market)")
-                st.write(results.get('ChatGPT', "OpenRouter required"))
+                st.write(results.get('ChatGPT', "Check OpenRouter key/credits"))
             with c2:
                 st.info("🟠 Claude (Strategy)")
-                st.write(results.get('Claude', "OpenRouter required"))
+                st.write(results.get('Claude', "Check OpenRouter key/credits"))
                 st.info("🟣 Perplexity (Trends)")
-                st.write(results.get('Perplexity', "OpenRouter required"))
+                st.write(results.get('Perplexity', "Check OpenRouter key/credits"))
 
     # --- OTHER TABS ---
     with tabs[2]:
