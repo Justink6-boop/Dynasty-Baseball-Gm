@@ -6,8 +6,9 @@ import pandas as pd
 from io import BytesIO
 import requests
 import json
+import time
 
-# --- 1. CONNECTION & UTILITY ENGINE ---
+# --- 1. CORE ENGINE & ADAPTIVE PARSER ---
 def get_gspread_client():
     info = dict(st.secrets["gcp_service_account"])
     key = info["private_key"].replace("\\n", "\n")
@@ -15,150 +16,146 @@ def get_gspread_client():
     creds = Credentials.from_service_account_info(info, scopes=scopes)
     return gspread.authorize(creds)
 
-def parse_roster_matrix(matrix, team_names):
-    league_data = {}
-    if not matrix: return league_data
-    header_row = matrix[0]
-    for col_idx, cell_value in enumerate(header_row):
-        team_name = str(cell_value).strip()
-        if team_name in team_names:
-            league_data[team_name] = []
-            for row in matrix[1:]:
-                if col_idx < len(row):
-                    p_name = str(row[col_idx]).strip()
-                    if p_name and not p_name.endswith(':'):
-                        league_data[team_name].append(p_name)
-    return league_data
+def parse_horizontal_rosters(matrix, team_names):
+    """Deep-scans Row 1 for teams and builds a full mapping of every player."""
+    league_map = {}
+    if not matrix: return league_map
+    headers = [str(cell).strip() for cell in matrix[0]]
+    for col_idx, team in enumerate(headers):
+        if team in team_names:
+            league_map[team] = [str(row[col_idx]).strip() for row in matrix[1:] if col_idx < len(row) and str(row[col_idx]).strip() and not str(row[col_idx]).strip().endswith(':')]
+    return league_map
 
-def convert_df_to_excel(df):
+def convert_to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Rosters')
+        df.to_excel(writer, index=False)
     return output.getvalue()
 
 SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A"
 
-# --- 2. MASTER LEAGUE DATA ---
-def get_initial_league():
+# --- 2. THE AI BRAIN (MULTI-AGENT) ---
+def call_openrouter(model_id, persona, prompt):
+    try:
+        r = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}", "HTTP-Referer": "https://streamlit.io"},
+            data=json.dumps({"model": model_id, "messages": [{"role": "system", "content": persona}, {"role": "user", "content": prompt}]}),
+            timeout=30
+        )
+        return r.json()['choices'][0]['message']['content'] if r.status_code == 200 else f"Offline ({r.status_code})"
+    except: return "Connection Timeout."
+
+def run_war_room(query, context_data, mode="Trade"):
+    """Stage 1: Live Research. Stage 2: Strategy Evaluation."""
+    with st.spinner("📡 Scouting 2026 ZiPS & Dynasty Tiers..."):
+        research = call_openrouter("perplexity/sonar", "You are a Sabermetric Researcher.", f"Research 2026 ZiPS, Statcast, and Dynasty Rankings for: {query}")
+    
+    full_brief = f"ROSTERS: {context_data}\nINTEL: {research}\nQUERY: {query}\nGOAL: Hybrid Retool (Peak 2027)."
+    
     return {
-        "Witness Protection (Me)": {}, "Bobbys Squad": {}, "Arm Barn Heros": {}, 
-        "Guti Gang": {}, "Happy": {}, "Hit it Hard Hit it Far": {}, 
-        "ManBearPuig": {}, "Milwaukee Beers": {}, "Seiya Later": {}, "Special Eds": {}
+        "Research": research,
+        "Gemini": model.generate_content(f"You are the Lead Scout. Evaluate this {mode}. Be brutally honest about value. {full_brief}").text,
+        "GPT": call_openrouter("openai/gpt-4o", "Aggressive Asset Manager. Focus on market value and surplus.", full_brief),
+        "Claude": call_openrouter("anthropic/claude-3.5-sonnet", "Strategy Architect. Focus on long-term roster construction.", full_brief)
     }
 
-# --- 3. PAGE CONFIG ---
-st.set_page_config(page_title="Executive GM Terminal", layout="wide")
-st.title("🧠 Dynasty GM Suite: Executive Terminal")
+# --- 3. PAGE INITIALIZATION ---
+st.set_page_config(page_title="GM Executive Terminal", layout="wide", page_icon="⚾")
+st.title("🏛️ Dynasty GM Suite: Executive Terminal")
 
-# --- 4. MAIN APP LOGIC ---
 try:
-    # A. INITIALIZE DATA & CONNECTIONS
-    init_data = get_initial_league()
-    team_list = list(init_data.keys())
+    # DATA BOOTSTRAP
+    team_names = ["Witness Protection (Me)", "Bobbys Squad", "Arm Barn Heros", "Guti Gang", "Happy", "Hit it Hard Hit it Far", "ManBearPuig", "Milwaukee Beers", "Seiya Later", "Special Eds"]
     gc = get_gspread_client()
     sh = gc.open_by_key(SHEET_ID)
-    history_ws = sh.get_worksheet(0)
-    roster_ws = sh.get_worksheet(1)
-
-    permanent_history = history_ws.col_values(1)
-    raw_roster_matrix = roster_ws.get_all_values()
-    parsed_rosters = parse_roster_matrix(raw_roster_matrix, team_list)
-
-    # B. AI CONFIGURATION (Self-Healing)
+    history_ws, roster_ws = sh.get_worksheet(0), sh.get_worksheet(1)
+    
+    raw_data = roster_ws.get_all_values()
+    parsed_league = parse_horizontal_rosters(raw_data, team_names)
+    
+    # AI BOOTSTRAP
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    flash_models = [m for m in available_models if 'flash' in m]
-    model = genai.GenerativeModel(flash_models[0] if flash_models else 'gemini-1.5-pro')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
-    # C. REBUILT WAR ROOM LOGIC
-    def call_openrouter(model_id, persona, prompt):
-        try:
-            r = requests.post(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}", "HTTP-Referer": "https://streamlit.io"},
-                data=json.dumps({"model": model_id, "messages": [{"role": "system", "content": persona}, {"role": "user", "content": prompt}]}),
-                timeout=30
-            )
-            return r.json()['choices'][0]['message']['content'] if r.status_code == 200 else f"Error {r.status_code}"
-        except: return "Connection Timeout."
+    # --- 4. THE INTERFACE ---
+    tabs = st.tabs(["🔁 Terminal", "⚖️ Fairness Analysis", "🔍 Trade Finder", "📋 Live Ledger", "🕵️‍♂️ Pro Scouting", "💎 Sleepers", "📜 History"])
 
-    def get_multi_ai_opinions(user_query, task_type="Trade"):
-        directive = "MISSION: 30% 2026 win-now / 70% 2027-29 peak. Hybrid Retool Strategy."
-        with st.spinner("📡 Scanning Jan 2026 ZiPS, FanGraphs, and Dynasty Rankings..."):
-            search_query = f"Provide 2026 ZiPS projections, Dynasty Rankings, and latest news for: {user_query}."
-            live_intel = call_openrouter("perplexity/sonar", "Lead Researcher.", search_query)
-
-        briefing = f"ROSTERS: {json.dumps(parsed_rosters)}\nINTEL: {live_intel}\nINPUT: {user_query}\nGOAL: {directive}"
-        return {
-            'Perplexity': live_intel,
-            'Gemini': model.generate_content(f"Lead Scout. Task: {task_type}. Briefing: {briefing}").text,
-            'ChatGPT': call_openrouter("openai/gpt-4o", "Market Analyst.", briefing),
-            'Claude': call_openrouter("anthropic/claude-3.5-sonnet", "Window Strategist.", briefing)
-        }
-
-    # --- 5. UI TABS (NOW INSIDE TRY BLOCK) ---
-    with st.sidebar:
-        st.header(f"💰 FAAB: ${st.session_state.get('faab', 200.00):.2f}")
-        spent = st.number_input("Log Spending:", min_value=0.0, key="faab_spend")
-        if st.button("Update Budget", key="update_faab_btn"):
-            st.session_state.faab = st.session_state.get('faab', 200.00) - spent
-
-    tabs = st.tabs(["🔁 Terminal", "🔥 Analysis", "🔍 Finder", "📋 Ledger", "🎯 Priority", "🕵️‍♂️ Scouting", "💎 Sleepers", "📜 History"])
-
-    # --- TAB 0: TERMINAL ---
+    # TAB 0: TRANSACTION TERMINAL
     with tabs[0]:
         st.subheader("Official League Transaction Terminal")
-        trans_type = st.radio("Action:", ["Trade", "Waiver/Drop"], horizontal=True, key="trans_type_radio")
-        if trans_type == "Trade":
-            col1, col2 = st.columns(2)
-            with col1:
-                team_a = st.selectbox("From Team:", team_list, key="ta_term")
-                p_out = st.text_area("Leaving Team A:", key="po_term")
-            with col2:
-                team_b = st.selectbox("To Team:", team_list, key="tb_term")
-                p_in = st.text_area("Leaving Team B:", key="pi_term")
-            if st.button("Execute Trade", key="exec_trade_btn"):
-                # Logic to update sheet...
-                st.info("Trade synced to horizontal ledger!")
-        else:
-            col1, col2 = st.columns(2)
-            with col1:
-                t_team = st.selectbox("Team:", team_list, key="wt_term")
-                act = st.selectbox("Action:", ["Add", "Drop"], key="wa_term")
-            with col2:
-                p_name = st.text_input("Player Name:", key="wp_term")
-            if st.button("Submit Move", key="submit_move_btn"):
-                st.info("Move logged!")
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            team_a = st.selectbox("Team A (Owner):", team_names, key="term_a")
+            p_out = st.text_area("Players/Picks Out:", placeholder="Separated by commas", key="term_out")
+        with t_col2:
+            team_b = st.selectbox("Team B (Counterparty):", team_names, key="term_b")
+            p_in = st.text_area("Players/Picks In:", placeholder="Separated by commas", key="term_in")
+        
+        if st.button("🔥 Execute Official Trade", use_container_width=True):
+            prompt = f"Matrix: {raw_data}. Move {p_out} from {team_a} to {team_b}. Move {p_in} from {team_b} to {team_a}. Return ONLY the updated list of lists for a horizontal sheet."
+            res = model.generate_content(prompt).text
+            clean = res.replace("```python", "").replace("```", "").strip()
+            try:
+                new_matrix = eval(clean)
+                roster_ws.clear()
+                roster_ws.update(new_matrix)
+                history_ws.append_row([f"TRADE: {team_a} ↔️ {team_b} | {p_out} for {p_in}"])
+                st.success("Ledger Synchronized!")
+                time.sleep(1)
+                st.rerun()
+            except: st.error("Parsing Error. Ensure names match the ledger.")
 
-    # --- TAB 1: ANALYSIS ---
+    # TAB 1: FAIRNESS ARBITRATOR
     with tabs[1]:
-        st.subheader("🚀 War Room: Live 2026 Intelligence")
-        trade_q = st.chat_input("Analyze trade...", key="trade_analysis_input")
-        if trade_q:
-            results = get_multi_ai_opinions(trade_q)
-            with st.expander("📡 Live Field Report", expanded=True):
-                st.write(results['Perplexity'])
-            st.divider()
+        st.subheader("⚖️ Two-Sided Trade Arbitrator")
+        trade_input = st.chat_input("Enter Trade: 'My Fried for his Skenes'")
+        if trade_input:
+            res = run_war_room(trade_input, json.dumps(parsed_league))
+            with st.expander("📡 Live Intelligence Briefing", expanded=True): st.write(res["Research"])
             c1, c2, c3 = st.columns(3)
-            with c1: st.info("🟢 Gemini"); st.write(results['Gemini'])
-            with c2: st.info("🔵 GPT-4o"); st.write(results['ChatGPT'])
-            with c3: st.info("🟠 Claude"); st.write(results['Claude'])
+            with c1: st.info("🟢 Lead Scout"); st.write(res["Gemini"])
+            with c2: st.info("🔵 Market Analyst"); st.write(res["GPT"])
+            with c3: st.info("🟠 Strategy Architect"); st.write(res["Claude"])
 
-    # --- TAB 2: FINDER ---
+    # TAB 2: TRADE FINDER (NEW)
     with tabs[2]:
-        st.subheader("🔍 Automated Trade Partner Finder")
-        target_need = st.selectbox("I am looking for:", ["Elite Prospects", "Starting Pitching", "Draft Capital"], key="finder_need")
-        offering = st.text_input("I am willing to offer:", key="finder_offer")
-        if st.button("Scour League", key="scour_league_btn"):
-            results = get_multi_ai_opinions(f"Find trades for {offering} to get {target_need}", "Finder")
-            st.markdown(results['Gemini'])
+        st.subheader("🔍 Automated Win-Win Partner Finder")
+        f_col1, f_col2 = st.columns(2)
+        with f_col1:
+            find_target = st.selectbox("I am looking for:", ["Elite Youth (<23)", "Impact 2026 Production", "Draft Capital", "Closer/RP Help"])
+        with f_col2:
+            find_offer = st.text_input("I am shopping:", placeholder="e.g. Max Fried, Veteran OF")
+        
+        if st.button("Scour League for Partners", use_container_width=True):
+            finder_results = run_war_room(f"Find trades to get {find_target} by giving up {find_offer}", json.dumps(parsed_league), mode="Trade Finder")
+            st.markdown(finder_results["Gemini"])
 
-    # --- TAB 3: LEDGER ---
+    # TAB 3: LEDGER
     with tabs[3]:
-        st.download_button("📥 Excel Download", convert_df_to_excel(pd.DataFrame(raw_roster_matrix)), "Rosters.xlsx", key="dl_btn")
-        st.dataframe(pd.DataFrame(raw_roster_matrix), use_container_width=True)
+        st.subheader("📊 Live Roster Matrix")
+        df_display = pd.DataFrame(raw_data)
+        st.dataframe(df_display, use_container_width=True)
+        st.download_button("📥 Export to Excel", convert_to_excel(df_display), "League_Rosters.xlsx")
 
-    # (Tabs 4-7 omitted for brevity, but follow same pattern)
+    # TAB 4: PRO SCOUTING
+    with tabs[4]:
+        scout_query = st.text_input("Enter Player for Deep Dive (Live 2026 Projections):")
+        if scout_query:
+            scout_res = run_war_room(f"Full Scouting Report: {scout_query}", json.dumps(parsed_league), mode="Scouting")
+            st.write(scout_res["Gemini"])
+
+    # TAB 5: SLEEPERS
+    with tabs[5]:
+        if st.button("💎 Scan for 2026 Market Inefficiencies"):
+            sleeper_res = run_war_room("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(parsed_league), mode="Sleepers")
+            st.write(sleeper_res["Gemini"])
+
+    # TAB 6: HISTORY
+    with tabs[6]:
+        st.subheader("📜 Transaction History")
+        for log in history_ws.col_values(1)[::-1]:
+            st.write(f"🔹 {log}")
 
 except Exception as e:
-    st.error(f"Executive System Offline: {e}")
+    st.error(f"Executive Protocol Failed: {e}")
