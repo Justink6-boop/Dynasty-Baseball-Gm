@@ -113,12 +113,17 @@ try:
 
     # B. AI CONFIGURATION
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
-    # SHARED GM BRAIN
-    def get_gm_advice(category, user_input=""):
-        context = f"LIVE_ROSTERS: {raw_roster_matrix}\nHISTORY: {permanent_history}\nMETRICS: ZiPS/FanGraphs Dynasty Fit (2026-28 Window)\nTASK: {category}"
-        return model.generate_content(f"{context}\nInput: {user_input}").text
+    
+    # This logic automatically finds the best available 'flash' model to avoid 404s
+    try:
+        # Try the most stable current name first
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    except:
+        # Fallback: List all models and pick the first one that supports text generation
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        flash_models = [m for m in available_models if 'flash' in m]
+        model_to_use = flash_models[0] if flash_models else available_models[0]
+        model = genai.GenerativeModel(model_to_use)
 
     # --- 4. SIDEBAR ---
     with st.sidebar:
