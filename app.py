@@ -203,6 +203,36 @@ def run_gm_analysis(query, league_data, task="Trade"):
         "GPT": call_openrouter("openai/gpt-4o", "Market Expert.", brief),
         "Claude": call_openrouter("anthropic/claude-3.5-sonnet", "Strategist.", brief)
     }
+    
+def organize_roster_ai(player_list):
+    """
+    Uses AI to sort a raw list of players into positional categories.
+    """
+    model = get_active_model()
+    prompt = f"""
+    You are a Fantasy Baseball Clerk. 
+    Here is a list of players: {player_list}
+    
+    TASK:
+    1. Identify the primary position for each player.
+    2. Group them into two strict lists: 'HITTERS:' and 'PITCHERS:'.
+    3. Within Hitters, sort by field position (C, 1B, 2B, 3B, SS, OF, DH).
+    4. Within Pitchers, sort by (SP, RP).
+    
+    OUTPUT FORMAT:
+    Return a single Python list of strings. 
+    Use the exact headers 'HITTERS:' and 'PITCHERS:' (with the colon).
+    Example: ['HITTERS:', 'Adley Rutschman', 'Gunnar Henderson', 'PITCHERS:', 'Corbin Burnes']
+    """
+    try:
+        response = model.generate_content(prompt).text
+        # Clean the response to get the list
+        match = re.search(r"(\[.*\])", response, re.DOTALL)
+        if match:
+            return eval(match.group(1))
+        return None
+    except Exception as e:
+        return None
 
 def analyze_trade_block_text(block_text, user_roster):
     prompt = f"Trade Block Audit. ROSTER: {user_roster}. BLOCK: {block_text}. Grade fits (A-F)."
