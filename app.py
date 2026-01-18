@@ -100,6 +100,59 @@ def organize_roster_ai(player_list):
         return None
     except: return None
 
+def smart_correct_vision(vision_data, full_league_data):
+    """
+    Cross-references AI vision results against the official ledger.
+    If the AI puts a player on the wrong side of the trade, this swaps them back.
+    """
+    # 1. Identify the teams the AI found
+    t_a = vision_data.get("team_a")
+    t_b = vision_data.get("team_b")
+    
+    # If teams aren't valid, we can't auto-correct
+    if t_a not in full_league_data or t_b not in full_league_data:
+        return vision_data
+
+    # 2. Flatten rosters for easy lookup
+    # Create simple lists of names for Team A and Team B from the spreadsheet
+    roster_a = [p['name'].lower().strip() for p in full_league_data[t_a]]
+    roster_b = [p['name'].lower().strip() for p in full_league_data[t_b]]
+    
+    # 3. The Buckets (Start Empty)
+    final_players_a = []
+    final_players_b = []
+    
+    # Combine all players the AI saw into one big pile
+    all_found_players = vision_data.get("players_a", []) + vision_data.get("players_b", [])
+    
+    # 4. Sort them correctly based on the Spreadsheet
+    for player in all_found_players:
+        # Fuzzy match this player against both rosters to find the TRUE owner
+        # We check Team A first
+        match_a = difflib.get_close_matches(player, roster_a, n=1, cutoff=0.6)
+        match_b = difflib.get_close_matches(player, roster_b, n=1, cutoff=0.6)
+        
+        if match_a:
+            # If he is on Team A's roster, he belongs to Team A (Giving)
+            final_players_a.append(player)
+        elif match_b:
+            # If he is on Team B's roster, he belongs to Team B (Giving)
+            final_players_b.append(player)
+        else:
+            # If unknown, leave him where the AI put him originally (Fallback)
+            if player in vision_data.get("players_a", []):
+                final_players_a.append(player)
+            else:
+                final_players_b.append(player)
+
+    # 5. Return corrected structure
+    return {
+        "team_a": t_a,
+        "players_a": final_players_a,
+        "team_b": t_b,
+        "players_b": final_players_b
+    }
+
 # --- 4. LOGIC & PARSING ---
 def parse_horizontal_rosters(matrix):
     """Maps Row 1 Headers to Columns with Fuzzy Matching."""
