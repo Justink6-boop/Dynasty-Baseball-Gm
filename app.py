@@ -1,63 +1,72 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- 1. THE LEAGUE KNOWLEDGE BASE ---
-# This acts as the 'Brain' the AI references before answering
-LEAGUE_INTEL = """
-TEAM ROSTERS:
-- [span_6](start_span)Team Witness Protection (User): Catchers: J.T. Realmuto, Dillon Dingler. Infield: Yandy Diaz (1B), Jake Cronenworth (2B), Ke'Bryan Hayes (3B), Ceddanne Rafaela (SS/OF). Outfield: Ronald Acuna Jr, Dylan Crews, JJ Bleday. Pitchers: Dylan Cease, Max Fried, Spencer Strider.[span_6](end_span)
-- Bobbys Squad: Catchers: Will Smith. Infield: Bobby Witt Jr (SS), Gunnar Henderson (SS), Pete Alonso (1B), Josh Naylor (1B). [span_7](start_span)Outfield: Jasson Dominguez, Luis Robert Jr.[span_7](end_span)
-- Arm Barn Heros: Catchers: Adley Rutschman. Infield: Trea Turner (SS), Marcus Semien (2B), Royce Lewis (3B). [span_8](start_span)Outfield: Aaron Judge, Fernando Tatis Jr, Corbin Carroll.[span_8](end_span)
-- Happy: Catchers: Francisco Alvarez. Infield: Jose Ramirez (3B), Corey Seager (SS), Freddie Freeman (1B). [span_9](start_span)Outfield: Juan Soto, Julio Rodriguez, Jackson Merrill.[span_9](end_span)
-- Guti Gang: Catchers: Cal Raleigh. Infield: Mookie Betts (SS), Francisco Lindor (SS), Ketel Marte (2B). [span_10](start_span)Outfield: James Wood, Cody Bellinger.[span_10](end_span)
+# --- 1. SYSTEM LOGIC: THE REASONING ENGINE ---
+# We define your league's unique 'Trade Value' parameters
+SYSTEM_PROMPT = """
+Role: OOTP-Style Executive Assistant GM.
+League Rules: 2-C, CI, MI slots. 6x6 scoring (OPS, QS, SVH).
+Strategy: Hard Youth Pivot. Primary window 2026-2028.
 
-LINEUP RULES: 
-[span_11](start_span)Must start 2 Catchers, 1B, 2B, 3B, SS, Corner Infield (CI), Middle Infield (MI), 3 OF, 2 UTIL.[span_11](end_span)
-STRATEGY: User is in a 'Hard Youth Pivot' targeting a 2026-2028 winning window.
+YOUR TASK:
+1. Grade players on a 0-100 scale:
+   - CURRENT: Immediate stats for the 2026 season.
+   - POTENTIAL: Value in 2027-2028 based on ZiPS/FanGraphs.
+2. Trade Simulation:
+   - Calculate 'Surplus Value'. A veteran like Marcell Ozuna has high Current but low Potential. 
+   - A prospect like Samuel Basallo has massive 2-C Potential.
+3. Verdict: Grade trades (A-F) and explain the 'Why' from an OOTP sim perspective.
 """
 
-# --- 2. AI CONFIGURATION ---
+# --- 2. LEAGUE DATA (Complete Rosters) ---
+# Pulled from your PDF to ensure the AI knows every manager's depth
+LEAGUE_DB = {
+    "Witness Protection (Me)": ["Ronald Acuna Jr.", "Spencer Strider", "Dylan Crews", "Ceddanne Rafaela", "J.T. Realmuto"],
+    "Bobbys Squad": ["Bobby Witt Jr.", "Gunnar Henderson", "Pete Alonso", "Will Smith"],
+    "Arm Barn Heros": ["Aaron Judge", "Adley Rutschman", "Fernando Tatis Jr.", "Corbin Carroll"],
+    "Happy": ["Juan Soto", "Julio Rodriguez", "Paul Skenes", "Jackson Holliday"],
+    "Guti Gang": ["Mookie Betts", "Francisco Lindor", "Ketel Marte", "James Wood"]
+}
+
+# --- 3. PERSISTENT STATE ---
+if "faab" not in st.session_state: st.session_state.faab = 200.00
+if "history" not in st.session_state: st.session_state.history = []
+if "messages" not in st.session_state: st.session_state.messages = []
+
+# --- 4. CONFIGURATION ---
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     model = genai.GenerativeModel('models/gemini-1.5-flash')
     
-    st.set_page_config(page_title="Dynasty Executive Assistant", layout="wide")
-    st.title("🧠 Dynasty Executive Assistant GM")
+    st.set_page_config(page_title="Executive Assistant GM", layout="wide")
+    st.title("🧠 Dynasty Assistant GM: Reasoning Engine")
 
-    # Initialize Session Memory
-    if "messages" not in st.session_state: st.session_state.messages = []
-    if "trades" not in st.session_state: st.session_state.trades = []
-
-    # SIDEBAR: Trade Logger (Memory)
+    # SIDEBAR: FAAB & Trade Log
     with st.sidebar:
-        st.header("📝 League Transaction Log")
-        st.caption("Tell the AI who moved where to update the brain.")
-        new_trade = st.text_input("Log a move:", placeholder="e.g. Bobbys Squad traded Witt Jr for Skenes")
-        if st.button("Update League History"):
-            st.session_state.trades.append(new_trade)
-            st.success("Trade recorded in memory!")
-        
-        st.subheader("Current Session History")
-        for t in st.session_state.trades: st.caption(f"✅ {t}")
+        st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
+        st.subheader("📢 Log Transaction")
+        move = st.text_input("Report move:", placeholder="e.g. Happy claimed Walcott")
+        if st.button("Update Brain"):
+            st.session_state.history.append(move)
+            st.success("Roster updated.")
 
-    # 3. CHAT INTERFACE
+    # 5. THE INTERFACE
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    if prompt := st.chat_input("Propose a trade or ask for strategy advice..."):
+    if prompt := st.chat_input("Ask: 'Grade a trade of Acuna for Skenes and a CI prospect'"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user").markdown(prompt)
         
-        # Combine everything for the AI's thought process
-        trade_history = "\n".join(st.session_state.trades)
-        full_context = f"{LEAGUE_INTEL}\n\nRECENT TRADES LOGGED:\n{trade_history}\n\nQUESTION: {prompt}"
+        # Combine rosters, history, and the system logic
+        moves_str = "\n".join(st.session_state.history)
+        context = f"{SYSTEM_PROMPT}\nROSTERS: {LEAGUE_DB}\nMOVES: {moves_str}\nUSER: {prompt}"
         
-        with st.spinner("Analyzing league depth and roster impact..."):
-            response = model.generate_content(full_context)
+        with st.spinner("Simulating trade outcomes..."):
+            response = model.generate_content(context)
             ai_text = response.text
-            
             st.session_state.messages.append({"role": "assistant", "content": ai_text})
             st.chat_message("assistant").markdown(ai_text)
 
 except Exception as e:
-    st.error(f"System Error: {e}")
+    st.error(f"Engine Offline: {e}")
