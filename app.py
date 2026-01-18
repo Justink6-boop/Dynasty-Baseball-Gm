@@ -68,7 +68,7 @@ FULL_LEAGUE_DB = {
 
 # --- 2. LOGIC & MEMORY ---
 SCORING = "6x6: HR, RBI, R, SB, AVG, OPS | QS, BAA, ERA, SVH, K/9, WHIP"
-STRATEGY = "2026-2028 Youth Pivot. High Value on 2-C, CI, MI."
+STRATEGY = "2026-2028 Youth Pivot. High Value on 2-C, CI, P, MI."
 
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 if "history" not in st.session_state: st.session_state.history = []
@@ -80,7 +80,7 @@ try:
     target = 'models/gemini-2.0-flash' if 'models/gemini-2.0-flash' in str(available) else available[0]
     model = genai.GenerativeModel(target)
     
-    st.set_page_config(page_title="Executive GM Suite", layout="wide")
+    st.set_page_config(page_title="Team Witness Protection Executive GM Suite", layout="wide")
     st.title("🧠 Dynasty Assistant: Executive GM Engine")
 
     # SIDEBAR: Living Memory
