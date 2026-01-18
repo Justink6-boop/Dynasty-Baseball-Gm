@@ -71,13 +71,22 @@ try:
         context = f"LIVE_ROSTERS: {raw_roster_matrix}\nMETRICS: ZiPS/FanGraphs Dynasty\nTASK: {category}"
         return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Report'}").text
 
-         # E. MULTI-AI WAR ROOM BRAIN
+             # E. MULTI-AI WAR ROOM BRAIN (HYBRID RETOOL EDITION)
     def get_multi_ai_opinions(user_trade):
-        context = f"LIVE_ROSTERS: {raw_roster_matrix}\nTRADE: {user_trade}"
+        hybrid_directive = """
+        STRATEGIC MISSION: Hybrid Retool. 
+        2026 GOAL: Stay competitive and avoid the basement. 
+        LONG-TERM GOAL: Peak contention in 2027-2029.
+        TARGETS: Elite 'Impact Youth' (Age 21-25) who contribute NOW but have decade-long ceilings.
+        GRADING BIAS: Value immediate MLB-ready production highly, but only if the player is <26 years old. 
+        VETERAN POLICY: Sell players age 30+ if the return is a 'Top 25' prospect or a young MLB breakout.
+        """
+        
+        context = f"LIVE_ROSTERS: {raw_roster_matrix}\nTRADE: {user_trade}\nMISSION: {hybrid_directive}"
         opinions = {}
         
-        # GM 1: Gemini (Standard)
-        opinions['Gemini'] = get_gm_advice("ZiPS Statistical Analysis", user_trade)
+        # GM 1: Gemini (The Scout)
+        opinions['Gemini'] = get_gm_advice("Retool Analysis: Present vs Future Value", user_trade)
 
         if "OPENROUTER_API_KEY" in st.secrets:
             api_key = st.secrets["OPENROUTER_API_KEY"]
@@ -89,31 +98,24 @@ try:
                     "X-Title": "Dynasty GM Suite",
                     "Content-Type": "application/json"
                 }
+                full_persona = f"{persona}\n{hybrid_directive}"
+                
                 payload = {
                     "model": model_id,
                     "messages": [
-                        {"role": "system", "content": persona},
-                        {"role": "user", "content": f"Context: {context}\nAnalyze this trade."}
+                        {"role": "system", "content": full_persona},
+                        {"role": "user", "content": f"Analyze this trade: {user_trade}"}
                     ]
                 }
                 try:
-                    r = requests.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers=headers,
-                        data=json.dumps(payload),
-                        timeout=20
-                    )
-                    if r.status_code == 200:
-                        return r.json()['choices'][0]['message']['content']
-                    else:
-                        return f"GM Error {r.status_code}: {r.text[:50]}"
-                except Exception as e:
-                    return f"Connection Timeout: {e}"
+                    r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, data=json.dumps(payload), timeout=25)
+                    return r.json()['choices'][0]['message']['content'] if r.status_code == 200 else f"GM Error: {r.status_code}"
+                except: return "Connection Timeout."
 
-            # NOW we call the GMs after the function is fully defined
-            opinions['ChatGPT'] = call_or("openai/gpt-4o", "Aggressive GM focused on pure market value and if the current proposed trade puts us in a good position for now and the future. Respond saying YES or NO and grades the trade on a letter scale.")
-            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "Conservative strategist focused on long-term risk. Explains the potential negatives of the trade while also highlighting why this could be good. Respond saying YES or NO and grades the trade on a letter scale.")
-            opinions['Perplexity'] = call_or("perplexity/sonar", "Data researcher focused on Statcast trends and news. Explains how this proposed trade impacts this years projected fantasy production as well as future fantasy productions. Respond saying YES or NO and grades the trade on a letter scale.")
+            # CALLING THE RETOOL GMs
+            opinions['ChatGPT'] = call_or("openai/gpt-4o", "You are a 'Market Bull' GM. You want players with high current stats who still have 'Trade Value' in 2 years.")
+            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "You are a 'Window Architect'. Analyze if this player provides the stats we need to stay mid-pack in 2026 while securing 2028.")
+            opinions['Perplexity'] = call_or("perplexity/sonar", "You are a 'Performance Analyst'. Look for young players with elite Statcast data (Exit Velo, Whiff Rate) that suggests immediate 2026 production.")
         
         return opinions
 
