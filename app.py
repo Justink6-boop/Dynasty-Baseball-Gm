@@ -125,22 +125,30 @@ def parse_horizontal_rosters(matrix):
     return league_map
 
 def parse_trade_screenshot(image_file, team_names):
-    """Uses Gemini Vision to read trade screenshots."""
+    """
+    Uses Gemini Vision to read trade screenshots.
+    INSTRUCTION: Explicitly expands 'F. Lastname' to 'Firstname Lastname'.
+    """
     model = get_active_model()
     img = Image.open(image_file)
     prompt = f"""
-    Analyze this fantasy trade screenshot.
-    Extract the two teams and players involved.
-    Match teams to: {team_names}
-    Output valid Python dict:
+    Analyze this fantasy baseball trade screenshot.
+    
+    CRITICAL INSTRUCTION: Fantrax often abbreviates names (e.g., "Z. Neto", "J. Soto"). 
+    You MUST expand these to their full MLB names (e.g., "Zach Neto", "Juan Soto") based on your baseball knowledge.
+    
+    1. Identify the two teams. Match them to this list: {team_names}
+    2. Extract the players/assets.
+    
+    Output a valid Python dictionary:
     {{
         "team_a": "Team Name",
-        "players_a": ["Player 1", "Player 2"],
+        "players_a": ["Full Name 1", "Full Name 2"],
         "team_b": "Team Name",
-        "players_b": ["Player 3"]
+        "players_b": ["Full Name 3"]
     }}
     """
-    with st.spinner("👀 Vision Processing..."):
+    with st.spinner("👀 Vision Processing & Name Expansion..."):
         try:
             res = model.generate_content([prompt, img]).text
             clean = res.replace("```python", "").replace("```", "").replace("json", "").strip()
