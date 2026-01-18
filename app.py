@@ -111,29 +111,23 @@ try:
     export_df = pd.DataFrame.from_dict(flat_data, orient='index').transpose()
     team_list = list(export_df.columns)
 
-    # --- C. AI CONFIGURATION & BRAIN ---
+        # B. AI CONFIGURATION
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
-    # Select best model
+    # Updated to the new Gemini 3 standard
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    except:
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        flash_models = [m for m in available_models if 'flash' in m]
-        model_to_use = flash_models[0] if flash_models else available_models[0]
-        model = genai.GenerativeModel(model_to_use)
-
-    # AI Shared Function (Defined before use in Tabs)
-    def get_gm_advice(category, user_input=""):
-        context = f"""
-        LIVE_ROSTERS: {raw_roster_matrix}
-        HISTORY: {permanent_history}
-        REFERENCE: {get_initial_league()}
-        METRICS: ZiPS/FanGraphs Dynasty Fit (2026-28 Window)
-        SCORING: 6x6 Category (OPS, QS focus).
-        TASK: {category}
-        """
-        return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Generate Report'}").text
+        # Gemini 3 Flash is the current state-of-the-art workhorse
+        model = genai.GenerativeModel('gemini-3-flash')
+    except Exception:
+        # Fallback to Gemini 2.5 Flash if 3 isn't available in your region yet
+        try:
+            model = genai.GenerativeModel('gemini-2.5-flash')
+        except Exception:
+            # Final dynamic fallback: List available models and pick the newest 'flash'
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            flash_models = [m for m in available_models if 'flash' in m]
+            model_to_use = flash_models[0] if flash_models else available_models[0]
+            model = genai.GenerativeModel(model_to_use)
 
     # --- 4. SIDEBAR ---
     with st.sidebar:
