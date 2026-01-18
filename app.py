@@ -15,6 +15,20 @@ def get_gspread_client():
     creds = Credentials.from_service_account_info(info, scopes=scopes)
     return gspread.authorize(creds)
 
+def parse_roster_matrix(matrix, team_names):
+    """Converts a vertical list of teams and players into a clean dictionary."""
+    league_data = {}
+    current_team = None
+    for row in matrix:
+        if not row or not row[0].strip(): continue
+        cell_value = row[0].strip()
+        if cell_value in team_names:
+            current_team = cell_value
+            league_data[current_team] = []
+        elif current_team:
+            league_data[current_team].append(cell_value)
+    return league_data
+
 def convert_df_to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -25,6 +39,7 @@ SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A"
 
 # --- 2. MASTER LEAGUE REFERENCE DATA ---
 def get_initial_league():
+    # (Keeping your dictionary the same)
     return {
         "Witness Protection (Me)": {"Catchers": ["Dillon Dingler", "J.T. Realmuto"], "Infielders": ["Jake Cronenworth (2B)", "Ke'Bryan Hayes (3B)", "Caleb Durbin (3B)", "Luisangel Acuna (2B)", "Ceddanne Rafaela (2B, OF)", "Michael Massey (2B)", "Ivan Herrera (UT)", "Enrique Hernandez (1B, 3B, OF)", "Yandy Diaz (1B)", "Wilmer Flores (1B)", "Jeff McNeil (2B, OF)", "Andy Ibanez (3B)"], "Outfielders": ["Ronald Acuna Jr.", "Dylan Beavers", "JJ Bleday", "Dylan Crews", "Byron Buxton", "lan Happ", "Tommy Pham", "Jacob Young", "Marcell Ozuna (UT)", "Justice Bigbie", "Alex Verdugo"], "Pitchers": ["Dylan Cease", "Jack Flaherty", "Max Fried", "Cristopher Sanchez", "Spencer Strider", "Pete Fairbanks", "Daysbel Hernandez", "Brant Hurter", "Blake Treinen", "Merrill Kelly", "Yimi Garcia", "Jordan Hicks", "Bryan King", "Alex Lange", "Shelby Miller", "Evan Phillips", "Yu Darvish", "Reynaldo Lopez", "Drue Hackenberg"], "Draft Picks": ["2026 Pick 1.02"]},
         "Bobbys Squad": {"Catchers": ["Drake Baldwin", "Will Smith", "Ryan Jeffers", "Sean Murphy", "Carter Jensen"], "Infielders": ["Pete Alonso (1B)", "Josh Naylor (1B)", "Xavier Edwards (2B, SS)", "Maikel Garcia (3B)", "Bobby Witt Jr. (SS)", "Gunnar Henderson (SS)", "Ronny Mauricio (3B)", "Colt Keith (2B, 3B)", "Brooks Lee (2B, 3B, SS)", "Tommy Edman (2B, OF)", "Nolan Arenado (3B)", "Cam Collier (1B, 3B)", "Ralphy Velazquez (1B)", "Jacob Berry (2B, 3B, OF)", "Blaze Jordan (1B, 3B)", "Brayden Taylor (2B, 3B)", "Josuar Gonzalez (SS)", "Elian Pena (SS)", "Cooper Pratt (SS)"], "Outfielders": ["Kerry Carpenter", "Drew Gilbert", "Wenceel Perez", "Tyler Soderstrom (1B/OF)", "Brent Rooker (UT)", "Jacob Wilson (SS)", "Jac Caglianone", "Jasson Dominguez", "Jake Mangum", "Luis Robert Jr.", "Kyle Stowers", "Zyhir Hope", "Spencer Jones"], "Pitchers": ["Logan Gilbert", "Aroldis Chapman", "Camilo Doval", "Lucas Erceg", "Carlos Estevez", "Kyle Finnegan", "Ronny Henriquez", "Tony Santillan", "Tanner Scott", "Cade Cavalli", "Dustin May", "Aaron Nola", "Eury Perez", "Ranger Suarez", "Trevor Megill", "Chase Burns", "Jacob Lopez", "Boston Bateman", "Tink Hence", "Chase Petty", "Brett Wichrowski", "Trey Yesavage"], "Draft Picks": ["2026 Pick 1.05"]},
@@ -42,8 +57,6 @@ def get_initial_league():
 st.set_page_config(page_title="Executive Assistant GM", layout="wide")
 st.title("🧠 Dynasty GM Suite: Executive Terminal")
 
-if "faab" not in st.session_state: st.session_state.faab = 200.00
-
 try:
     # A. DATA CONNECTIONS
     gc = get_gspread_client()
@@ -56,89 +69,64 @@ try:
 
     # B. PROCESS TEAM LIST
     init_data = get_initial_league()
-    flat_data = {team: [p for pos in players.values() if isinstance(pos, list) for p in pos] + players.get("Draft Picks", []) for team, players in init_data.items()}
-    export_df = pd.DataFrame.from_dict(flat_data, orient='index').transpose()
-    team_list = list(export_df.columns)
+    team_list = list(init_data.keys())
+    
+    # C. PARSE ROSTERS (Crucial fix: Parsing data before AI uses it)
+    parsed_rosters = parse_roster_matrix(raw_roster_matrix, team_list)
 
-    # C. AI CONFIGURATION
+    # D. AI CONFIGURATION
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
     best_model = [m for m in models if 'flash' in m][0] if [m for m in models if 'flash' in m] else models[0]
     model = genai.GenerativeModel(best_model)
 
-    # D. SHARED GM BRAIN
+    # E. SHARED GM BRAIN (Injecting the Parsed Data)
     def get_gm_advice(category, user_input=""):
-        context = f"LIVE_ROSTERS: {raw_roster_matrix}\nMETRICS: ZiPS/FanGraphs Dynasty\nTASK: {category}"
+        context = f"""
+        LIVE_ROSTERS (Structured): {json.dumps(parsed_rosters, indent=2)}
+        HISTORY: {permanent_history}
+        METRICS: ZiPS/FanGraphs Dynasty
+        STRATEGY: Hybrid Retool (Competitive 2026 / Peak 2027)
+        TASK: {category}
+        """
         return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Report'}").text
 
-             # E. MULTI-AI WAR ROOM BRAIN (HYBRID RETOOL EDITION)
+    # F. MULTI-AI WAR ROOM BRAIN
     def get_multi_ai_opinions(user_trade):
-        hybrid_directive = """
-        STRATEGIC MISSION: Hybrid Retool. 
-        2026 GOAL: Stay competitive and avoid the basement. 
-        LONG-TERM GOAL: Peak contention in 2027-2029.
-        TARGETS: Elite 'Impact Youth' (Age 21-25) who contribute NOW but have decade-long ceilings.
-        GRADING BIAS: Value immediate MLB-ready production highly, but only if the player is <26 years old. 
-        VETERAN POLICY: Sell players age 30+ if the return is a 'Top 25' prospect or a young MLB breakout.
-        """
-        
-        context = f"LIVE_ROSTERS: {raw_roster_matrix}\nTRADE: {user_trade}\nMISSION: {hybrid_directive}"
+        hybrid_directive = "STRATEGIC MISSION: Hybrid Retool. 30% 2026 win-now / 70% 2027-29 future peak."
+        full_context = f"ROSTERS: {json.dumps(parsed_rosters)}\nTRADE: {user_trade}\nMISSION: {hybrid_directive}"
         opinions = {}
         
-        # GM 1: Gemini (The Scout)
-        opinions['Gemini'] = get_gm_advice("Retool Analysis: Present vs Future Value", user_trade)
+        # Gemini
+        opinions['Gemini'] = get_gm_advice("Retool Analysis", user_trade)
 
         if "OPENROUTER_API_KEY" in st.secrets:
-            api_key = st.secrets["OPENROUTER_API_KEY"]
-            
-            def call_or(model_id, persona):
-                headers = {
-                    "Authorization": f"Bearer {api_key}",
-                    "HTTP-Referer": "https://streamlit.io",
-                    "X-Title": "Dynasty GM Suite",
-                    "Content-Type": "application/json"
-                }
-                full_persona = f"{persona}\n{hybrid_directive}"
-                
-                payload = {
-                    "model": model_id,
-                    "messages": [
-                        {"role": "system", "content": full_persona},
-                        {"role": "user", "content": f"Analyze this trade: {user_trade}"}
-                    ]
-                }
+            def call_or(m_id, persona):
                 try:
-                    r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, data=json.dumps(payload), timeout=25)
-                    return r.json()['choices'][0]['message']['content'] if r.status_code == 200 else f"GM Error: {r.status_code}"
+                    r = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}", "HTTP-Referer": "https://streamlit.io"},
+                        data=json.dumps({"model": m_id, "messages": [{"role":"system","content":f"{persona}\n{hybrid_directive}"}, {"role":"user","content":full_context}]}),
+                        timeout=25)
+                    return r.json()['choices'][0]['message']['content'] if r.status_code == 200 else f"Error: {r.status_code}"
                 except: return "Connection Timeout."
 
-            # CALLING THE RETOOL GMs
-            opinions['ChatGPT'] = call_or("openai/gpt-4o", "You are a 'Market Bull' GM. You want players with high current stats who still have 'Trade Value' in 2 years.")
-            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "You are a 'Window Architect'. Analyze if this player provides the stats we need to stay mid-pack in 2026 while securing 2028.")
-            opinions['Perplexity'] = call_or("perplexity/sonar", "You are a 'Performance Analyst'. Look for young players with elite Statcast data (Exit Velo, Whiff Rate) that suggests immediate 2026 production.")
+            opinions['ChatGPT'] = call_or("openai/gpt-4o", "Market Bull GM.")
+            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "Window Architect Strategist.")
+            opinions['Perplexity'] = call_or("perplexity/sonar", "Statcast Performance Analyst.")
         
         return opinions
 
     # --- 4. SIDEBAR ---
     with st.sidebar:
-        st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
+        st.header(f"💰 FAAB: ${st.session_state.get('faab', 200.00):.2f}")
         spent = st.number_input("Log Spending:", min_value=0.0)
         if st.button("Update Budget"): st.session_state.faab -= spent
         st.divider()
-        st.info("💡 Transactions must be logged in the first tab.")
+        st.info("💡 Transactions must be logged in the Terminal.")
 
     # --- 5. THE EXECUTIVE SUITE TABS ---
-    tabs = st.tabs([
-        "🔁 Transaction Terminal", 
-        "🔥 Trade Analysis", 
-        "📋 Live Ledger", 
-        "🎯 Priority Candidates", 
-        "🕵️‍♂️ Full Scouting", 
-        "💎 Sleeper Cell", 
-        "📜 History Log"
-    ])
+    tabs = st.tabs(["🔁 Transaction Terminal", "🔥 Trade Analysis", "📋 Live Ledger", "🎯 Priority Candidates", "🕵️‍♂️ Full Scouting", "💎 Sleeper Cell", "📜 History Log"])
 
-    # --- TAB 0: TRANSACTION TERMINAL ---
     with tabs[0]:
         st.subheader("Official League Transaction Terminal")
         trans_type = st.radio("Action:", ["Trade", "Waiver/Drop"], horizontal=True)
@@ -151,63 +139,46 @@ try:
                 team_b = st.selectbox("To Team:", team_list, key="tb")
                 p_in = st.text_area("Leaving Team B:", key="pi")
             if st.button("Execute Trade"):
-                with st.spinner("Updating Sheets..."):
-                    prompt = f"DATA: {raw_roster_matrix}\nMove {p_out} A->B, {p_in} B->A. Return ONLY Python list of lists."
-                    res = model.generate_content(prompt).text
-                    clean = res.replace("```python", "").replace("```", "").strip()
-                    try:
-                        new_list = eval(clean)
-                        roster_ws.clear()
-                        roster_ws.update(new_list)
-                        history_ws.append_row([f"TRADE: {team_a} ↔️ {team_b}"])
-                        st.success("Synced!")
-                        st.rerun()
-                    except: st.error("Format Error.")
+                prompt = f"DATA: {raw_roster_matrix}\nMove {p_out} A->B, {p_in} B->A. Return ONLY Python list of lists."
+                res = model.generate_content(prompt).text
+                clean = res.replace("```python", "").replace("```", "").strip()
+                try:
+                    new_list = eval(clean); roster_ws.clear(); roster_ws.update(new_list); history_ws.append_row([f"TRADE: {team_a} ↔️ {team_b}"]); st.rerun()
+                except: st.error("Sync Error.")
         else:
             col1, col2 = st.columns(2)
             with col1:
-                t_team = st.selectbox("Team:", team_list, key="wt")
-                act = st.selectbox("Action:", ["Add", "Drop"], key="wa")
+                t_team = st.selectbox("Team:", team_list, key="wt"); act = st.selectbox("Action:", ["Add", "Drop"], key="wa")
             with col2: p_name = st.text_input("Player Name:", key="wp")
             if st.button("Submit Move"):
                 prompt = f"DATA: {raw_roster_matrix}\n{act} {p_name} to/from {t_team}. Return ONLY Python list."
                 res = model.generate_content(prompt).text
                 clean = res.replace("```python", "").replace("```", "").strip()
                 try:
-                    new_list = eval(clean)
-                    roster_ws.clear()
-                    roster_ws.update(new_list)
-                    history_ws.append_row([f"{act.upper()}: {p_name} ({t_team})"])
-                    st.rerun()
-                except: st.error("Format Error.")
+                    new_list = eval(clean); roster_ws.clear(); roster_ws.update(new_list); history_ws.append_row([f"{act.upper()}: {p_name} ({t_team})"]); st.rerun()
+                except: st.error("Sync Error.")
 
-    # --- TAB 1: WAR ROOM ---
     with tabs[1]:
-        st.subheader("OOTP War Room: Multi-AI Consensus")
-        trade_q = st.chat_input("Enter trade details (e.g. 'Fried for Skenes')...")
+        st.subheader("OOTP War Room: Hybrid Retool Consensus")
+        trade_q = st.chat_input("Analyze Fried for Skenes...")
         if trade_q:
             results = get_multi_ai_opinions(trade_q)
             c1, c2 = st.columns(2)
             with c1:
-                st.info("🟢 Gemini (Scout)")
-                st.write(results.get('Gemini'))
-                st.info("🔵 ChatGPT (Market)")
-                st.write(results.get('ChatGPT', "Check OpenRouter key/credits"))
+                st.info("🟢 Gemini (Scout)"); st.write(results.get('Gemini'))
+                st.info("🔵 ChatGPT (Market)"); st.write(results.get('ChatGPT'))
             with c2:
-                st.info("🟠 Claude (Strategy)")
-                st.write(results.get('Claude', "Check OpenRouter key/credits"))
-                st.info("🟣 Perplexity (Trends)")
-                st.write(results.get('Perplexity', "Check OpenRouter key/credits"))
+                st.info("🟠 Claude (Strategy)"); st.write(results.get('Claude'))
+                st.info("🟣 Perplexity (Trends)"); st.write(results.get('Perplexity'))
 
-    # --- OTHER TABS ---
     with tabs[2]:
-        st.download_button("📥 Excel Download", convert_df_to_excel(export_df), "Rosters.xlsx")
+        st.download_button("📥 Excel Download", convert_df_to_excel(pd.DataFrame(raw_roster_matrix)), "Rosters.xlsx")
         st.dataframe(pd.DataFrame(raw_roster_matrix), use_container_width=True)
     with tabs[3]:
         if st.button("ZiPS Targets"): st.markdown(get_gm_advice("Priority Trade Candidates"))
     with tabs[4]:
-        scout_n = st.text_input("Scout Player:")
-        if scout_n: st.markdown(get_gm_advice("Scouting Fit Analysis", scout_n))
+        sn = st.text_input("Scout Player:")
+        if sn: st.markdown(get_gm_advice("Scouting Fit Analysis", sn))
     with tabs[5]:
         if st.button("Scout Sleepers"): st.markdown(get_gm_advice("Dynasty Sleeper ID"))
     with tabs[6]:
