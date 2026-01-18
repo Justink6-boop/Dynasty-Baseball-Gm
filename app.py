@@ -5,12 +5,30 @@ from google.oauth2.service_account import Credentials
 
 # --- 1. DIRECT PERMANENT CONNECTION ENGINE ---
 def get_gspread_client():
-    # Fetch secrets as a dictionary
+    # Convert secrets to a mutable dictionary
     info = dict(st.secrets["gcp_service_account"])
     
-    # SELF-HEALING: Manually clean the private key for RSA compatibility
-    # This fixes the "incorrect padding" by ensuring the backslashes are real line breaks
-    info["private_key"] = info["private_key"].replace("\\n", "\n")
+    # THE JANITOR: Self-repairing key logic
+    key = info["private_key"]
+    
+    # 1. Strip all spaces/newlines iOS might have added
+    key = "".join(key.split())
+    
+    # 2. Put the headers back in properly
+    key = key.replace("-----BEGINPRIVATEKEY-----", "-----BEGIN PRIVATE KEY-----\n")
+    key = key.replace("-----ENDPRIVATEKEY-----", "\n-----END PRIVATE KEY-----\n")
+    
+    # 3. Fix internal padding (force multiple of 4)
+    # We do this by splitting the key body and adding '=' if needed
+    body = key.split("-----")
+    if len(body) > 2:
+        main_content = body[2].strip()
+        padding = len(main_content) % 4
+        if padding > 0:
+            main_content += "=" * (4 - padding)
+        key = f"-----BEGIN PRIVATE KEY-----\n{main_content}\n-----END PRIVATE KEY-----\n"
+
+    info["private_key"] = key
     
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(info, scopes=scopes)
