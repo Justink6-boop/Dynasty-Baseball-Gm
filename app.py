@@ -145,8 +145,9 @@ try:
                     st.rerun()
                 except: st.error("AI returned invalid format. Please try again.")
 
-    # --- 5. THE EXECUTIVE SUITE TABS ---
+        # --- 5. THE EXECUTIVE SUITE TABS ---
     tabs = st.tabs([
+        "🔁 Transaction Terminal", 
         "🔥 Trade Analysis", 
         "📋 Live Ledger", 
         "🎯 Priority Candidates", 
@@ -156,20 +157,85 @@ try:
         "📜 History Log"
     ])
 
+    # --- TAB 0: TRANSACTION TERMINAL (NEW) ---
     with tabs[0]:
+        st.subheader("Official League Transaction Terminal")
+        
+        # Toggle between Trade and Waiver
+        trans_type = st.radio("Select Transaction Type:", ["Trade", "Waiver/Drop"], horizontal=True)
+        
+        if trans_type == "Trade":
+            col1, col2 = st.columns(2)
+            # Use export_df columns for the dropdown list of teams
+            team_list = list(export_df.columns)
+            with col1:
+                team_a = st.selectbox("From Team:", team_list, key="ta_terminal")
+                players_out = st.text_area("Players/Picks Leaving Team A:", placeholder="One per line", key="out_terminal")
+            with col2:
+                team_b = st.selectbox("To Team:", team_list, key="tb_terminal")
+                players_in = st.text_area("Players/Picks Leaving Team B:", placeholder="One per line", key="in_terminal")
+
+            if st.button("Execute Trade & Sync"):
+                if team_a == team_b:
+                    st.error("Teams must be different!")
+                else:
+                    with st.spinner("Processing official move..."):
+                        update_prompt = f"""
+                        DATA: {raw_roster_matrix}
+                        ACTION: Move these players: {players_out} FROM {team_a} TO {team_b}.
+                        ACTION: Move these players: {players_in} FROM {team_b} TO {team_a}.
+                        TASK: Return ONLY the updated Python list of lists. No conversational text.
+                        """
+                        response = model.generate_content(update_prompt).text
+                        clean_response = response.replace("```python", "").replace("```", "").strip()
+                        try:
+                            new_list = eval(clean_response)
+                            roster_ws.clear()
+                            roster_ws.update(new_list)
+                            
+                            log_entry = f"TRADE: {team_a} sends {players_out.strip()} to {team_b} for {players_in.strip()}"
+                            history_ws.append_row([log_entry])
+                            st.success(f"Successfully processed: {team_a} ↔️ {team_b}")
+                            st.rerun()
+                        except:
+                            st.error("Execution failed. Check player name spelling or AI format.")
+
+        else:  # Waiver/Drop Logic
+            col1, col2 = st.columns(2)
+            with col1:
+                target_team = st.selectbox("Select Team:", list(export_df.columns), key="waiver_team")
+                action = st.selectbox("Action:", ["Add", "Drop"], key="waiver_action")
+            with col2:
+                player_name = st.text_input("Player Name:", key="waiver_player")
+            
+            if st.button("Submit Waiver/Drop"):
+                with st.spinner("Updating Roster..."):
+                    if action == "Add":
+                        prompt = f"DATA: {raw_roster_matrix}\nACTION: Add {player_name} to {target_team}. Return ONLY the Python list of lists."
+                    else:
+                        prompt = f"DATA: {raw_roster_matrix}\nACTION: Remove {player_name} from {target_team}. Return ONLY the Python list of lists."
+                    
+                    response = model.generate_content(prompt).text
+                    clean_response = response.replace("```python", "").replace("```", "").strip()
+                    try:
+                        new_list = eval(clean_response)
+                        roster_ws.clear()
+                        roster_ws.update(new_list)
+                        history_ws.append_row([f"{action.upper()}: {player_name} ({target_team})"])
+                        st.success(f"Player {action}ed successfully!")
+                        st.rerun()
+                    except:
+                        st.error("Action failed. The AI had trouble updating the list format.")
+
+    # --- REMAINING TABS (Analysis, Ledger, Scouting, etc.) ---
+    with tabs[1]:
         st.subheader("Trade Grading (ZiPS & FanGraphs Context)")
         trade_grade = st.chat_input("Analyze a trade or get suggestions...")
         if trade_grade:
             st.markdown(get_gm_advice("Trade Negotiation & Grading", trade_grade))
 
-    with tabs[1]:
+    with tabs[2]:
         st.subheader("Current Database Status")
-        # Build DataFrame for Download from the full dictionary
-        # We transform the nested dict into a columnar DataFrame
-        init_data = get_initial_league()
-        flat_data = {team: [p for pos in players.values() if isinstance(pos, list) for p in pos] + players.get("Draft Picks", []) for team, players in init_data.items()}
-        export_df = pd.DataFrame.from_dict(flat_data, orient='index').transpose()
-        
         st.download_button(
             label="📥 Download Initial Excel Template",
             data=convert_df_to_excel(export_df),
@@ -177,26 +243,21 @@ try:
         )
         st.dataframe(pd.DataFrame(raw_roster_matrix), use_container_width=True)
 
-    with tabs[2]:
+    with tabs[3]:
         st.subheader("Top Trade Targets (ZiPS Buy-Lows)")
         if st.button("Generate Trade Target List"):
             st.markdown(get_gm_advice("Priority Trade Candidates - ZiPS Optimized"))
 
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("Fit & Scouting Report")
-        player_q = st.text_input("Enter Player Name:")
+        player_q = st.text_input("Enter Player Name:", key="scouting_search")
         if player_q:
             st.markdown(get_gm_advice("Scouting Fit Analysis", player_q))
 
-    with tabs[4]:
+    with tabs[5]:
         st.subheader("Dynasty Sleeper Hub")
         if st.button("Scout Sleepers"):
             st.markdown(get_gm_advice("2026-2028 Sleeper Identification"))
-
-    with tabs[5]:
-        st.subheader("Immediate Waiver Needs")
-        if st.button("Scan Free Agents"):
-            st.markdown(get_gm_advice("Category-Specific Priority FAs"))
 
     with tabs[6]:
         st.subheader("Transaction History")
