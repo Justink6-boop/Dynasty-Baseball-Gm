@@ -5,8 +5,13 @@ from google.oauth2.service_account import Credentials
 
 # --- 1. DIRECT PERMANENT CONNECTION ENGINE ---
 def get_gspread_client():
-    # Pulls formatted credentials from your Streamlit Secrets
-    info = st.secrets["gcp_service_account"]
+    # Fetch secrets as a dictionary
+    info = dict(st.secrets["gcp_service_account"])
+    
+    # SELF-HEALING: Manually clean the private key for RSA compatibility
+    # This fixes the "incorrect padding" by ensuring the backslashes are real line breaks
+    info["private_key"] = info["private_key"].replace("\\n", "\n")
+    
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(info, scopes=scopes)
     return gspread.authorize(creds)
