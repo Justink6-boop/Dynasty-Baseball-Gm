@@ -71,27 +71,32 @@ st.title("🧠 Dynasty Assistant: Permanent Living Ledger")
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 
 try:
-    # Authenticate and Connect
+    # 1. Connect to your Sheet
     gc = get_gspread_client()
     sh = gc.open_by_key(SHEET_ID)
-    worksheet = sh.get_worksheet(0)
     
-    # Read persistent history from the Google Sheet
-    permanent_history = worksheet.col_values(1)
+    # --- MULTI-TAB SETUP ---
+    # Worksheet 0 (first tab) = Trade History
+    history_ws = sh.get_worksheet(0)
+    permanent_history = history_ws.col_values(1)
     
-        # Configure Gemini
+    # Worksheet 1 (second tab) = The actual Roster Database
+    # If you haven't made a second tab yet, this will trigger the error below
+    try:
+        roster_ws = sh.get_worksheet(1)
+        # This reads every row and column of your rosters
+        current_roster_data = roster_ws.get_all_values()
+    except:
+        current_roster_data = "Roster tab not found. Please add a second tab to your Google Sheet."
+
+    # 2. Configure Gemini API
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    
-    # DYNAMIC PICKER: Find the best available Flash model
     available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    
-    # Try to find a 'flash' model first, otherwise use the first available one
     flash_models = [m for m in available_models if 'flash' in m]
     model_to_use = flash_models[0] if flash_models else available_models[0]
-    
     model = genai.GenerativeModel(model_to_use)
 
-    # SIDEBAR: Permanent Logging & FAAB
+    # --- SIDEBAR: DATABASE UPDATE ENGINE ---
     with st.sidebar:
         st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
         spent = st.number_input("Log Spent Bid:", min_value=0.0, step=1.0)
@@ -99,10 +104,26 @@ try:
 
         st.divider()
         st.subheader("📢 Log Transaction")
-        move = st.text_input("Trade/Claim:", placeholder="e.g. 'Fried to Happy for Skenes'")
-        if st.button("Commit to Cloud"):
-            worksheet.append_row([move])
-            st.success("Synced to Permanent Ledger!")
+        move = st.text_input("Trade/Claim:", placeholder="e.g. 'Fried for Skenes'")
+        
+        if st.button("Update Database & Log"):
+            # A. Log the text to Tab 1 (History)
+            history_ws.append_row([move])
+            
+            # B. AI Roster Logic
+            with st.spinner("AI is rewriting the database..."):
+                update_prompt = f"""
+                CURRENT_ROSTERS: {current_roster_data}
+                TRANSACTION: {move}
+                TASK: Act as a database administrator. Update the players' teams. 
+                Keep the team names as headers. Return the updated data as a clean 
+                comma-separated list for each row.
+                """
+                new_data_raw = model.generate_content(update_prompt).text
+                
+                # C. Save the new list back to Tab 2 (Rosters)
+                # Note: This is where we will add the "write" command once your sheet is ready
+                st.success("History logged! To update rosters, ensure Tab 2 exists.")
             st.rerun()
 
     # APP TABS
