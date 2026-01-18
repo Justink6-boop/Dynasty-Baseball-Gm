@@ -2,8 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. THE COMPLETE MASTER LEAGUE LEDGER (All 10 Teams) ---
-# [cite_start]Pre-loaded with every player from your document [cite: 1-17]
+# --- 1. FULL LEAGUE ROSTERS (From Your Document) ---
 def get_initial_league():
     return {
         "Witness Protection (Me)": {
@@ -71,68 +70,68 @@ def get_initial_league():
         }
     }
 
-# --- 2. PERMANENT CONNECTION & STATE ---
-# Replace with your actual Google Sheet URL
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A/edit?usp=drivesdk"
+# --- 2. PERMANENT DATA CONNECTION & STATE ---
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1vC3R3Yv3G0h7W_8Iu-XvX5D5_4l7X_2H5_4Y_2H5_4Y" # Replace with your URL
 
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 if "master_ledger" not in st.session_state: st.session_state.master_ledger = get_initial_league()
 
-# --- 3. CONNECTION & LIVE STATE ENGINE ---
+# --- 3. CONNECTION & AI ENGINE ---
 try:
-    # Set up Permanent Cloud Storage
+    # 3a. Secrets & Connection Verification
+    if "gcp_service_account" not in st.secrets:
+        st.error("GCP Secrets Missing in Dashboard.")
+        st.stop()
+
+    # Permanent History from Google Sheets
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(spreadsheet=SHEET_URL, ttl=0)
     permanent_history = df.values.tolist() if not df.empty else []
 
-    # Configure AI
+    # Configure Gemini
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     model = genai.GenerativeModel('gemini-2.0-flash')
     
-    st.set_page_config(page_title="Executive Assistant GM", layout="wide")
-    st.title("🧠 Dynasty Assistant: Permanent Living Ledger")
+    st.set_page_config(page_title="Executive GM Suite", layout="wide")
+    st.title("🧠 Dynasty Assistant: Executive GM Engine")
 
-if "gcp_service_account" not in st.secrets:
-    st.error("Secrets not found! Check your Streamlit Cloud Dashboard.")
-else:
-    st.success("Credentials detected. Attempting to connect to Google...")
-
-    # SIDEBAR: Living Controls & Transaction Commit
+    # SIDEBAR: Permanent Logging
     with st.sidebar:
         st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
         spent = st.number_input("Log Spent Bid:", min_value=0.0, step=1.0)
         if st.button("Update Budget"): st.session_state.faab -= spent
-
+        
         st.divider()
-        st.subheader("📢 Log Transaction")
-        move_desc = st.text_input("Trade/Claim:", placeholder="e.g. 'Witness Protection traded Fried for Skenes'")
-        if st.button("Commit to Cloud"):
-            # Appends move to Google Sheets FOREVER
+        st.subheader("📢 Commit Transaction")
+        move_desc = st.text_input("Report move:", placeholder="e.g. 'Soto to Happy for Skenes'")
+        if st.button("Sync to Cloud"):
             conn.create(spreadsheet=SHEET_URL, data=[[move_desc]])
             st.success("Synced to Google Sheets!")
             st.rerun()
 
-    # 4. MULTI-TAB STRATEGIC ARCHITECTURE
-    tabs = st.tabs(["🔥 Analysis & Scout", "📋 Master Ledger", "🕵️‍♂️ Priority FAs", "😴 Sleepers", "💰 FAAB Strategy"])
+    # 4. TABBED STRATEGIC ARCHITECTURE
+    tabs = st.tabs(["🔥 Trade Analysis", "📋 Master Ledger", "🎯 Priority FAs", "🕵️‍♂️ Trade Targets", "😴 Sleepers", "💰 FAAB Strategy"])
 
-    # Shared Logic for AI Reasoning Hubs
     def get_ai_advice(query_type, user_prompt=""):
-        # AI reads the PERMANENT history from Google Sheets before answering
-        context = f"ROSTERS: {st.session_state.master_ledger}\nSCORING: 6x6 (OPS, QS, SVH)\nWINDOW: 2026-28\nPERMANENT HISTORY: {permanent_history}\n"
-        full_query = f"{context}\nQuery: {query_type}\nUser Input: {user_prompt}"
+        context = f"""
+        ROSTERS: {st.session_state.master_ledger}
+        SCORING: 6x6 (OPS, QS, SVH)
+        WINDOW: 2026-28 Youth Pivot
+        PERMANENT HISTORY: {permanent_history}
+        """
+        full_query = f"{context}\nTask: {query_type}\nInput: {user_prompt}"
         return model.generate_content(full_query).text
 
     with tabs[0]:
-        st.subheader("OOTP Trade Simulator & Suggestions")
-        trade_prompt = st.chat_input("Grade a trade or ask for suggestions...")
+        st.subheader("OOTP Trade Simulator")
+        trade_prompt = st.chat_input("Grade a trade...")
         if trade_prompt:
-            with st.spinner("Calculating Surplus Value..."):
+            with st.spinner("Analyzing surplus value..."):
                 st.markdown(get_ai_advice("Trade Analysis", trade_prompt))
 
     with tabs[1]:
         st.subheader("Live Global Ledger")
-        st.info("Rosters reflect the initial draft. Use 'Analysis' to see how recent trades impact these rosters.")
-        team = st.selectbox("Select Team to Inspect:", list(st.session_state.master_ledger.keys()))
+        team = st.selectbox("View Manager's Full Depth Chart:", list(st.session_state.master_ledger.keys()))
         col1, col2 = st.columns(2)
         team_data = st.session_state.master_ledger[team]
         with col1:
@@ -141,21 +140,29 @@ else:
         with col2:
             st.write("**Outfielders:**", team_data.get("Outfielders", []))
             st.write("**Pitchers:**", team_data.get("Pitchers", []))
-            st.write("**Picks:**", team_data.get("Draft Picks", []))
 
     with tabs[2]:
         st.subheader("Real-Time Priority Free Agent Scouting")
         if st.button("Brainstorm Priority FAs"):
-            with st.spinner("Identifying high-floor ZiPS targets..."):
-                st.markdown(get_ai_advice("Scout Free Agents"))
-        fa_chat = st.text_input("Search position-specific FAs:")
+            with st.spinner("Identifying targets..."):
+                st.markdown(get_ai_advice("Priority Free Agents"))
+        fa_chat = st.text_input("Specific FA needs:")
         if fa_chat: st.markdown(get_ai_advice("FA Deep Dive", fa_chat))
 
     with tabs[3]:
-        st.subheader("Sleepers & Undervalued Assets")
-        if st.button("Scan for Sleepers"):
-            with st.spinner("Analyzing exit velo and prospect age-curves..."):
-                st.markdown(get_ai_advice("Sleeper Identification"))
+        st.subheader("Trade Target Suggestion Engine")
+        if st.button("Generate Trade Projects"):
+            st.markdown(get_ai_advice("Trade Target Identification"))
+
+    with tabs[4]:
+        st.subheader("Sleeper Cell: Undervalued Assets")
+        if st.button("Find Undervalued Sleepers"):
+            st.markdown(get_ai_advice("Sleeper Identification"))
+
+    with tabs[5]:
+        st.subheader("FAAB Strategy Hub")
+        if st.button("Calculate Bid Strategy"):
+            st.markdown(get_ai_advice("FAAB Budget Strategy"))
 
 except Exception as e:
-    st.error(f"Setup Error: {e}")
+    st.error(f"Reasoning Engine Offline: {e}")
