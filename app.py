@@ -71,7 +71,7 @@ try:
         context = f"LIVE_ROSTERS: {raw_roster_matrix}\nMETRICS: ZiPS/FanGraphs Dynasty\nTASK: {category}"
         return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Report'}").text
 
-    # E. MULTI-AI WAR ROOM BRAIN
+     # E. MULTI-AI WAR ROOM BRAIN
     def get_multi_ai_opinions(user_trade):
         context = f"LIVE_ROSTERS: {raw_roster_matrix}\nTRADE: {user_trade}"
         opinions = {}
@@ -79,27 +79,44 @@ try:
         # GM 1: Gemini (Standard)
         opinions['Gemini'] = get_gm_advice("ZiPS Statistical Analysis", user_trade)
 
-        if "OPENROUTER_API_KEY" in st.secrets:
-            def call_or(m_name, persona):
+        if "OPENROUTER_API_KEY" in st.session_state or "OPENROUTER_API_KEY" in st.secrets:
+            api_key = st.secrets.get("OPENROUTER_API_KEY")
+            
+            def call_or(model_id, persona):
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": "https://dynasty-gm-suite.streamlit.app", # Identifies your app
+                    "X-Title": "Dynasty GM Suite", # App name for OpenRouter logs
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": model_id,
+                    "messages": [
+                        {"role": "system", "content": persona},
+                        {"role": "user", "content": f"Context: {context}\nAnalyze this trade."}
+                    ],
+                    "temperature": 0.7
+                }
                 try:
-                    # Fallback list for resilience
-                    try_list = [m_name, "google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.1-8b-instruct:free"]
-                    for m in try_list:
-                        r = requests.post(
-                            "https://openrouter.ai/api/v1/chat/completions",
-                            headers={"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}", "HTTP-Referer": "https://streamlit.io"},
-                            data=json.dumps({"model": m, "messages": [{"role":"system","content":persona}, {"role":"user","content":context}]}),
-                            timeout=10)
-                        if r.status_code == 200:
-                            return r.json()['choices'][0]['message']['content']
-                    return "GM Busy."
-                except: return "GM Offline."
+                    r = requests.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers=headers,
+                        data=json.dumps(payload),
+                        timeout=20
+                    )
+                    if r.status_code == 200:
+                        return r.json()['choices'][0]['message']['content']
+                    else:
+                        # This will show you exactly why it's failing (e.g., 401, 402, 429)
+                        return f"GM Error {r.status_code}: {r.json().get('error', {}).get('message', 'Unknown error')}"
+                except Exception as e:
+                    return f"Connection Timeout: {e}"
 
-                        # FREE VERSION CALLS
-            opinions['ChatGPT'] = call_or("google/gemini-2.0-flash-exp:free", "Aggressive GM focused on market value and how return fits into current plan of young talent while looking to the future.")
-            opinions['Claude'] = call_or("anthropic/claude-3-haiku:free", "Conservative strategist focused on injury risk and how the trade would benefit now versus later.")
-            opinions['Perplexity'] = call_or("meta-llama/llama-3.1-8b-instruct:free", "Data researcher focused on Statcast trends and the fantasy outlook based on if the trade was completed versus if it wasn't. If they should not complete this trade, list other possible avenues.")
-
+            # UPDATED PAID MODEL PATHS
+            opinions['ChatGPT'] = call_or("openai/gpt-4o", "You are an aggressive GM focused on pure market value.")
+            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "You are a conservative strategist focused on long-term risk.")
+            opinions['Perplexity'] = call_or("perplexity/sonar-reasoning", "You are a data researcher focused on Statcast trends.")
+        
         return opinions
 
     # --- 4. SIDEBAR ---
