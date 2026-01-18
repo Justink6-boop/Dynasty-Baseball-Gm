@@ -61,7 +61,7 @@ def get_initial_league():
             "Catchers": ["Shea Langeliers", "Logan O'Hoppe", "Jonah Heim", "Keibert Ruiz"],
             "Infielders": ["Alec Burleson (1B, OF)", "Jorge Polanco (2B)", "Manny Machado (3B)", "Dansby Swanson (SS)", "Eugenio Suarez (3B)", "Luke Keaschall (2B)", "Ozzie Albies (2B)", "Triston Casas (1B)", "Ryan O'Hearn (1B, OF)", "Pavin Smith (1B)", "Alec Bohm (3B)", "Oswaldo Cabrera (3B)", "Xander Bogaerts (SS)", "Colson Montgomery (SS)", "Carson Williams (SS)", "Charlie Condon (1B)", "Termarr Johnson (2B)"],
             "Outfielders": ["Teoscar Hernandez", "Steven Kwan", "Jung Hoo Lee", "Lars Nootbaar", "Justin Crawford", "Victor Scott", "Masataka Yoshida (UT)", "Walker Jenkins"],
-            "Pitchers": ["Matthew Boyd", "Noah Cameron", "Sean Manaea", "Luis Severino", "Brady Singer", "Michael Wacha", "Brandon Woodruff", "Jose Alvarado", "Aaron Civale", "Connelly Early", "Kyle Harrison", "Logan Henderson", "Jake Irvin", "Miles Mikolas", "Charlie Morton", "Roki Sasaki", "Jameson Taillon", "Haden Smith"]
+            "Pitchers": ["Matthew Boyd", "Noah Cameron", "Sean Manaea", "Luis Severino", "Brady Singer", "Michael Wacha", "Brandon Woodruff", "Jose Alvarado", "Aaron Civale", "Connelly Early", "Kyle Harrison", "Logan Henderson", "Jake Irvin", "Miles Mikolas", "Charlie Morton", "Roki Sasaki", "Jameson Taillon", "Hagen Smith"]
         },
         "ManBearPuig": {
             "Catchers": ["Samuel Basallo", "William Contreras", "Jimmy Crooks", "Josue Briceno (1B)", "Eduardo Tait"],
@@ -105,29 +105,35 @@ try:
     permanent_history = history_ws.col_values(1)
     raw_roster_matrix = roster_ws.get_all_values()
 
-    # --- B. PROCESS TEAM LIST (Crucial for Dropdowns) ---
+    # --- B. PROCESS TEAM LIST ---
     init_data = get_initial_league()
     flat_data = {team: [p for pos in players.values() if isinstance(pos, list) for p in pos] + players.get("Draft Picks", []) for team, players in init_data.items()}
     export_df = pd.DataFrame.from_dict(flat_data, orient='index').transpose()
     team_list = list(export_df.columns)
 
-        # B. AI CONFIGURATION
+    # --- C. AI CONFIGURATION & BRAIN ---
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
-    # Updated to the new Gemini 3 standard
     try:
-        # Gemini 3 Flash is the current state-of-the-art workhorse
         model = genai.GenerativeModel('gemini-3-flash')
     except Exception:
-        # Fallback to Gemini 2.5 Flash if 3 isn't available in your region yet
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
         except Exception:
-            # Final dynamic fallback: List available models and pick the newest 'flash'
             available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             flash_models = [m for m in available_models if 'flash' in m]
             model_to_use = flash_models[0] if flash_models else available_models[0]
             model = genai.GenerativeModel(model_to_use)
+
+    # SHARED GM BRAIN (MUST BE DEFINED BEFORE TABS)
+    def get_gm_advice(category, user_input=""):
+        context = f"""
+        LIVE_ROSTERS: {raw_roster_matrix}
+        HISTORY: {permanent_history}
+        METRICS: ZiPS/FanGraphs Dynasty Fit (2026-28 Window)
+        TASK: {category}
+        """
+        return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Generate Report'}").text
 
     # --- 4. SIDEBAR ---
     with st.sidebar:
@@ -203,26 +209,26 @@ try:
 
     # --- TAB 1: TRADE ANALYSIS ---
     with tabs[1]:
-        st.subheader("OOTP-Style Trade Consultant")
-        trade_q = st.chat_input("Analyze this trade...")
-        if trade_q:
-            st.markdown(get_gm_advice("Trade Grading", trade_q))
+        st.subheader("Trade Grading (ZiPS & FanGraphs Context)")
+        trade_grade = st.chat_input("Analyze a trade or get suggestions...")
+        if trade_grade:
+            st.markdown(get_gm_advice("Trade Negotiation & Grading", trade_grade))
 
     # --- TAB 2: LIVE LEDGER ---
     with tabs[2]:
         st.subheader("Live Database Status")
-        st.download_button(label="📥 Download Excel Template", data=convert_df_to_excel(export_df), file_name="League_Rosters.xlsx")
+        st.download_button(label="📥 Download Template", data=convert_df_to_excel(export_df), file_name="League_Rosters.xlsx")
         st.dataframe(pd.DataFrame(raw_roster_matrix), use_container_width=True)
 
     # --- TAB 3: TARGETS ---
     with tabs[3]:
-        st.subheader("ZiPS Optimized Targets")
+        st.subheader("ZiPS Buy-Lows")
         if st.button("Generate Trade Target List"):
             st.markdown(get_gm_advice("Priority Trade Candidates"))
 
     # --- TAB 4: SCOUTING ---
     with tabs[4]:
-        st.subheader("Deep Scouting Report")
+        st.subheader("Fit & Scouting Report")
         scout_p = st.text_input("Enter Player for Fit Analysis:")
         if scout_p:
             st.markdown(get_gm_advice("Scouting Fit Analysis", scout_p))
