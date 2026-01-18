@@ -73,7 +73,7 @@ def get_initial_league():
 
 # --- 2. PERMANENT CONNECTION & STATE ---
 # Replace with your actual Google Sheet URL
-SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A/edit?usp=drivesdk"
 
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 if "master_ledger" not in st.session_state: st.session_state.master_ledger = get_initial_league()
