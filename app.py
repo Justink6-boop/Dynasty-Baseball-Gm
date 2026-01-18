@@ -318,12 +318,42 @@ def analyze_trade_block_text(block_text, user_roster):
     with st.spinner("Analyzing Matches..."):
         return call_openrouter("anthropic/claude-3.5-sonnet", "Assistant GM.", prompt)
 
-def analyze_trade_block_image(image_file, user_roster):
+def analyze_multi_image_block(image_files, user_roster):
+    """
+    Analyzes multiple images at once for Trade Block Monitoring.
+    Groups by Team/Position and provides ZiPS/Dynasty Grades.
+    """
     model = get_active_model()
-    img = Image.open(image_file)
-    prompt = f"Extract names. Expand abbreviations. Compare to MY ROSTER: {user_roster}. Grade fit (A-F)."
-    with st.spinner("👀 Scanning Block..."):
-        return model.generate_content([prompt, img]).text
+    
+    # Prepare content list with Prompt + All Images
+    prompt = f"""
+    You are an Expert Dynasty GM Assistant.
+    I have uploaded multiple screenshots of trade blocks from my league.
+    
+    MY ROSTER: {user_roster}
+    MY GOAL: Win in 2027 (Retooling).
+    
+    TASK:
+    1. Extract ALL player names and their teams from the images. Expand abbreviations (e.g. "Z. Neto" -> "Zach Neto").
+    2. Organize the report by TEAM, then by POSITION (C, 1B, 2B, 3B, SS, OF, SP, RP).
+    3. For EACH player, provide a 'Fit Grade' (A-F) and a verdict (PURSUE or PASS).
+    4. Base your grades on 2026 ZiPS Projections and Dynasty Rankings.
+    
+    FORMAT:
+    ## [Team Name]
+    ### [Position]
+    * **Player Name** - **Grade**: [A-F]
+      * *Verdict*: [PURSUE/PASS]
+      * *Analysis*: [Reasoning using ZiPS/Dynasty value]
+    """
+    
+    content = [prompt]
+    for img_file in image_files:
+        img = Image.open(img_file)
+        content.append(img)
+        
+    with st.spinner(f"👀 Scanning {len(image_files)} Screenshots & Grading Fits..."):
+        return model.generate_content(content).text
 
 # --- 6. UI DIALOGS ---
 @st.dialog("Verify Roster Sync")
@@ -464,14 +494,18 @@ try:
     # TAB 3: BLOCK MONITOR
     with tabs[3]:
         st.subheader("📋 Trade Block Evaluator")
+        
+        # 1. Sync Data Check
         if block_data:
             st.success(f"✅ Synced {len(block_data)} players.")
             if st.button("Analyze Synced Block"):
                 st.write(analyze_trade_block_text(", ".join(block_data), json.dumps(user_roster)))
         
-        up_file = st.file_uploader("📸 Upload Block Screenshot", type=["jpg", "png"])
-        if up_file and st.button("Analyze Image"):
-            st.write(analyze_trade_block_image(up_file, json.dumps(user_roster)))
+        # 2. Multi-Image Upload
+        st.divider()
+        up_files = st.file_uploader("📸 Upload Block Screenshots", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
+        if up_files and st.button("Analyze All Images"):
+            st.markdown(analyze_multi_image_block(up_files, json.dumps(user_roster)))
 
     # TAB 4: LEDGER (BULK SORT)
     with tabs[4]:
@@ -533,18 +567,19 @@ try:
         if scout_p:
             scout_res = run_gm_analysis(f"Full scouting report for {scout_p}", json.dumps(full_league_data), "Scouting")
             c1, c2 = st.columns(2)
-            with c1: st.info("Gemini"); st.write(scout_res["Gemini"])
-            with c2: st.info("Consensus"); st.write(scout_res["GPT"])
+            with c1: st.info("Gemini Analysis"); st.write(scout_res["Gemini"])
+            with c2: st.info("Market Consensus"); st.write(scout_res["GPT"])
 
     # TAB 6: SLEEPERS
     with tabs[6]:
-        if st.button("Identify Breakouts"):
-            res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(full_league_data), "Sleepers")
-            st.write(res["Gemini"]); st.write(res["Claude"])
+        if st.button("Identify Undervalued Breakouts"):
+            sleeper_res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(full_league_data), "Sleepers")
+            st.write(sleeper_res["Gemini"])
+            st.write(sleeper_res["Claude"])
 
     # TAB 7: PRIORITY
     with tabs[7]:
-        if st.button("Generate Targets"):
+        if st.button("Generate Priority Target List"):
             res = run_gm_analysis("Who are the top 5 targets I should move for now?", json.dumps(full_league_data), "Priority")
             st.write(res["Gemini"])
 
