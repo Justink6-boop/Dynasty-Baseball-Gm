@@ -71,7 +71,7 @@ def get_initial_league():
     }
 
 # --- 2. PERMANENT DATA CONNECTION & STATE ---
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1vC3R3Yv3G0h7W_8Iu-XvX5D5_4l7X_2H5_4Y_2H5_4Y" # Replace with your URL
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1vC3R3Yv3G0h7W_8Iu-XvX5D5_4l7X_2H5_4Y_2H5_4Y"
 
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 if "master_ledger" not in st.session_state: st.session_state.master_ledger = get_initial_league()
