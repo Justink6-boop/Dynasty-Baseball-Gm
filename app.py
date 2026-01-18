@@ -2,49 +2,25 @@ import streamlit as st
 import google.generativeai as genai
 import gspread
 from google.oauth2.service_account import Credentials
+import pandas as pd
 
-# --- 1. DIRECT PERMANENT CONNECTION ENGINE ---
+# --- 1. CONNECTION ENGINE ---
 def get_gspread_client():
-    # Convert secrets to a mutable dictionary
     info = dict(st.secrets["gcp_service_account"])
-    
-    # THE JANITOR: Self-repairing key logic
-    key = info["private_key"]
-    
-    # 1. Strip all spaces/newlines iOS might have added
-    key = "".join(key.split())
-    
-    # 2. Put the headers back in properly
-    key = key.replace("-----BEGINPRIVATEKEY-----", "-----BEGIN PRIVATE KEY-----\n")
-    key = key.replace("-----ENDPRIVATEKEY-----", "\n-----END PRIVATE KEY-----\n")
-    
-    # 3. Fix internal padding (force multiple of 4)
-    # We do this by splitting the key body and adding '=' if needed
-    body = key.split("-----")
-    if len(body) > 2:
-        main_content = body[2].strip()
-        padding = len(main_content) % 4
-        if padding > 0:
-            main_content += "=" * (4 - padding)
-        key = f"-----BEGIN PRIVATE KEY-----\n{main_content}\n-----END PRIVATE KEY-----\n"
-
-    info["private_key"] = key
-    
+    key = info["private_key"].replace("\\n", "\n")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(info, scopes=scopes)
     return gspread.authorize(creds)
 
-# --- 2. YOUR GOOGLE SHEET ID ---
-# Paste the ID from your URL: docs.google.com/spreadsheets/d/[THIS_PART]/edit
 SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A" 
 
-# --- 1. FULL LEAGUE ROSTERS (From Your Document) ---
+# --- 2. POSITIONAL REFERENCE (AI Context) ---
 def get_initial_league():
     return {
         "Witness Protection (Me)": {
             "Catchers": ["Dillon Dingler", "J.T. Realmuto"],
             "Infielders": ["Jake Cronenworth (2B)", "Ke'Bryan Hayes (3B)", "Caleb Durbin (3B)", "Luisangel Acuna (2B)", "Ceddanne Rafaela (2B, OF)", "Michael Massey (2B)", "Ivan Herrera (UT)", "Enrique Hernandez (1B, 3B, OF)", "Yandy Diaz (1B)", "Wilmer Flores (1B)", "Jeff McNeil (2B, OF)", "Andy Ibanez (3B)"],
-            "Outfielders": ["Ronald Acuna Jr.", "Dylan Beavers", "JJ Bleday", "Dylan Crews", "Byron Buxton", "lan Happ", "Tommy Pham", "Jacob Young", "Marcell Ozuna (UT)", "Justice Bigbie", "Alex Verdugo"],
+            "Outfielders": ["Ronald Acuna Jr.", "Dylan Beavers", "JJ Bleday", "Dylan Crews", "Byron Buxton", "Ian Happ", "Tommy Pham", "Jacob Young", "Marcell Ozuna (UT)", "Justice Bigbie", "Alex Verdugo"],
             "Pitchers": ["Dylan Cease", "Jack Flaherty", "Max Fried", "Cristopher Sanchez", "Spencer Strider", "Pete Fairbanks", "Daysbel Hernandez", "Brant Hurter", "Blake Treinen", "Merrill Kelly", "Yimi Garcia", "Jordan Hicks", "Bryan King", "Alex Lange", "Shelby Miller", "Evan Phillips", "Yu Darvish", "Reynaldo Lopez", "Drue Hackenberg"],
             "Draft Picks": ["2026 Pick 1.02"]
         },
@@ -105,126 +81,70 @@ def get_initial_league():
             "Pitchers": ["Erick Fedde", "Yusei Kikuchi", "Jesus Luzardo", "Bailey Ober", "Ryan Pepiot", "Freddy Peralta", "Nick Pivetta", "J.P. Sears", "Tomoyuki Sugano", "Griffin Canning", "Nestor Cortes Jr.", "Clarke Schmidt", "Taijuan Walker", "Simeon Woods-Richardson", "Ryan Pressly", "Alex Cobb", "Josiah Gray", "Shane McClanahan", "John Means", "Dane Dunning", "Martin Perez"]
         }
     }
-# --- 4. THE LIVE ENGINE ---
+
+# --- 3. PAGE CONFIG ---
 st.set_page_config(page_title="Executive Assistant GM", layout="wide")
-st.title("🧠 Dynasty Assistant: Permanent Living Ledger")
+st.title("🧠 Dynasty Assistant: Living Database")
 
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 
-import pandas as pd
-
 try:
-    # 1. Connect to both tabs
+    # 1. DATA CONNECTION
     gc = get_gspread_client()
     sh = gc.open_by_key(SHEET_ID)
-    
-    # History Tab (Text Log)
     history_ws = sh.get_worksheet(0)
-    # Rosters Tab (The actual Database)
-    roster_ws = sh.get_worksheet(1) 
+    roster_ws = sh.get_worksheet(1) # Ensure your sheet has a 2nd tab!
 
-    # Fetch current state from Sheet
     permanent_history = history_ws.col_values(1)
-    
-    # Get current rosters as a list of lists (the "Live Ledger")
-    # This replaces the hardcoded dictionary in your script
     raw_rosters = roster_ws.get_all_values()
-    df_rosters = pd.DataFrame(raw_rosters)
 
-    # 2. Configure Gemini
+    # 2. AI SETUP
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    flash_models = [m for m in available_models if 'flash' in m]
+    model = genai.GenerativeModel(flash_models[0] if flash_models else available_models[0])
 
-    # SIDEBAR: The Transaction Engine
+    # 3. SIDEBAR TRANSACTIONS
     with st.sidebar:
-        st.header("📢 Log Transaction")
+        st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
+        spent = st.number_input("Log Spent:", min_value=0.0)
+        if st.button("Update Budget"): st.session_state.faab -= spent
+
+        st.divider()
+        st.subheader("📢 Log Transaction")
         move = st.text_input("Trade/Claim:", placeholder="e.g. 'Fried for Skenes'")
-        
         if st.button("Update Live Database"):
-            with st.spinner("AI is re-calculating rosters..."):
-                # We feed the AI the CURRENT state from the spreadsheet
-                update_prompt = f"""
-                CURRENT_SPREADSHEET_DATA: {raw_rosters}
-                TRANSACTION: {move}
-                TASK: Act as a database admin. Move the players between teams 
-                based on the transaction. Keep the same column headers.
-                Return the updated data as a Python list of lists.
-                Format: [["Team A", "Team B"], ["Player 1", "Player 2"]]
-                Return ONLY the list.
-                """
+            with st.spinner("AI is re-sorting rosters..."):
+                update_prompt = f"CURRENT_DATA: {raw_rosters}\nMOVE: {move}\nTASK: Update the list of lists. Keep headers. Return ONLY the Python list."
                 response = model.generate_content(update_prompt)
-                
-                # Parse the AI response back into a Python list
                 try:
                     new_roster_list = eval(response.text.strip())
-                    
-                    # 1. Update the Roster Sheet (OVERWRITE)
                     roster_ws.clear()
                     roster_ws.update(new_roster_list)
-                    
-                    # 2. Log the text to History
                     history_ws.append_row([move])
-                    
-                    st.success("Rosters Updated in Google Sheets!")
+                    st.success("Synced!")
                     st.rerun()
                 except:
-                    st.error("AI returned invalid format. Try phrasing the trade more clearly.")
+                    st.error("AI Error. Try again.")
 
-    # TABS: The View
-    tabs = st.tabs(["🔥 Trade Analysis", "📋 Live Ledger"])
-
-    with tabs[1]:
-        st.subheader("Current Roster Database (Live from Sheet)")
-        # Show the actual data from the spreadsheet
-        st.dataframe(df_rosters, use_container_width=True)
-
-except Exception as e:
-    st.error(f"Reasoning Engine Offline: {e}")
-
-    # APP TABS
-    tabs = st.tabs(["🔥 Analysis & Scout", "📋 Master Ledger", "🕵️‍♂️ Permanent History", "😴 Sleepers", "💰 FAAB Strategy"])
-
-    # Core AI Logic
-    def get_ai_advice(query_type, user_prompt=""):
-        context = f"""
-        ROSTERS: {get_initial_league()}
-        PERMANENT_HISTORY: {permanent_history}
-        SCORING: 6x6 (OPS, QS, SVH)
-        WINDOW: 2026-28 Rebuild/Youth Pivot
-        """
-        full_query = f"{context}\nTask: {query_type}\nUser Input: {user_prompt}"
-        response = model.generate_content(full_query)
-        return response.text
+    # 4. TABS INTERFACE
+    tabs = st.tabs(["🔥 Trade Analysis", "📋 Live Ledger", "🕵️‍♂️ History Log"])
 
     with tabs[0]:
-        st.subheader("OOTP-Style Trade Analysis")
-        trade_prompt = st.chat_input("Grade a trade or ask for suggestions...")
-        if trade_prompt:
-            with st.spinner("Analyzing league impact..."):
-                st.markdown(get_ai_advice("Trade Analysis", trade_prompt))
+        st.subheader("AI Trade Consultant")
+        trade_q = st.chat_input("Ask about a trade...")
+        if trade_q:
+            context = f"ROSTERS: {raw_rosters}\nTRADES: {permanent_history}\nQUERY: {trade_q}"
+            st.markdown(model.generate_content(context).text)
 
     with tabs[1]:
-        st.subheader("Global Roster View (Initial)")
-        team = st.selectbox("Select Team:", list(get_initial_league().keys()))
-        t_data = get_initial_league()[team]
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**Catchers:**", t_data.get("Catchers", []))
-            st.write("**Infielders:**", t_data.get("Infielders", []))
-        with col2:
-            st.write("**Outfielders:**", t_data.get("Outfielders", []))
-            st.write("**Pitchers:**", t_data.get("Pitchers", []))
-            st.write("**Picks:**", t_data.get("Draft Picks", []))
+        st.subheader("Current Spreadsheet Database")
+        st.dataframe(pd.DataFrame(raw_rosters), use_container_width=True)
 
     with tabs[2]:
-        st.subheader("Every Trade Ever Logged (From Sheet)")
-        for idx, trade in enumerate(permanent_history):
-            st.write(f"{idx+1}. ✅ {trade}")
-
-    with tabs[3]:
-        st.subheader("Sleeper Cell")
-        if st.button("Generate Sleeper Report"):
-            st.markdown(get_ai_advice("Sleeper Identification", "Find undervalued assets."))
+        st.subheader("Full History Log")
+        for trade in permanent_history:
+            st.write(f"✅ {trade}")
 
 except Exception as e:
-    st.error(f"Reasoning Engine Offline: {e}")
+    st.error(f"System Error: {e}")
