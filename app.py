@@ -1,76 +1,76 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- 1. SYSTEM BRAIN: FYPD, SCORING, & OOTP LOGIC ---
-SYSTEM_PROMPT = """
-Role: OOTP-Style Executive Assistant GM. Window: 2026-2028.
-Scoring (6x6): HR, RBI, R, SB, AVG, OPS | QS, BAA, ERA, SVH, K/9, WHIP.
-Roster Rules: 2-C, 1B, 2B, 3B, SS, CI, MI, 3 OF, 2 UTIL.
-
-VALUATION RULES:
-- Grade players 0-100 on CURRENT (2026) and POTENTIAL (2027-2028).
-- FYPD Pick Valuation: 1.01-1.03 (85-95), 1.04-1.08 (70-84), Late 1st (55-69).
-- Trade Grading: Use 'Surplus Value' logic. Picks are 'Currency'. 
-- Scouting: Monitor top 2026 names like Tatsuya Imai, Eli Willits, and Roch Cholowsky.
-"""
-
-# --- 2. INITIAL LEAGUE DATA (From PDF) ---
-INITIAL_ROSTERS = {
-    "Witness Protection (Me)": ["Ronald Acuna Jr.", "Dylan Crews", "2026 Pick 1.02"],
-    "Bobbys Squad": ["Bobby Witt Jr.", "Gunnar Henderson", "2026 Pick 1.05"],
-    "Arm Barn Heros": ["Aaron Judge", "Adley Rutschman", "2026 Pick 2.01"],
-    "Guti Gang": ["Mookie Betts", "Francisco Lindor", "James Wood"],
-    "Happy": ["Juan Soto", "Julio Rodriguez", "Jackson Merrill", "Ethan Salas"]
+# --- 1. THE COMPLETE LEAGUE DATABASE (From Your Document) ---
+FULL_ROSTERS = {
+    "Witness Protection (Me)": ["Ronald Acuna Jr.", "Spencer Strider", "Dylan Crews", "J.T. Realmuto", "Max Fried", "2026 Pick 1.02"],
+    "Bobbys Squad": ["Bobby Witt Jr.", "Gunnar Henderson", "Will Smith", "Pete Alonso", "2026 Pick 1.05"],
+    "Arm Barn Heros": ["Aaron Judge", "Adley Rutschman", "Fernando Tatis Jr.", "Corbin Carroll", "Royce Lewis"],
+    "Guti Gang": ["Mookie Betts", "Francisco Lindor", "Ketel Marte", "James Wood", "Cal Raleigh"],
+    "Happy": ["Juan Soto", "Julio Rodriguez", "Jackson Merrill", "Ethan Salas", "Jackson Holliday"],
+    "ManBearPuig": ["Elly De La Cruz", "Yordan Alvarez", "Samuel Basallo", "Vladimir Guerrero Jr.", "Matt Olson"],
+    "Milwaukee Beers": ["Shohei Ohtani", "Bryce Harper", "Austin Riley", "Sebastian Walcott", "Harry Ford"],
+    "Seiya Later": ["Tarik Skubal", "Chris Sale", "Rafael Devers", "Agustin Ramirez", "Bo Bichette"],
+    "Special Eds": ["Randy Arozarena", "Masyn Winn", "Bo Naylor", "Freddy Peralta"],
+    "Hit it Hard Hit it Far": ["Logan O'Hoppe", "Ozzie Albies", "Manny Machado", "Roki Sasaki", "Triston Casas"]
 }
 
-# --- 3. PERSISTENT MEMORY ---
+# --- 2. PERMANENT MEMORY & SCORING ---
 if "faab" not in st.session_state: st.session_state.faab = 200.00
-if "league_rosters" not in st.session_state: st.session_state.league_rosters = INITIAL_ROSTERS
 if "history" not in st.session_state: st.session_state.history = []
 if "messages" not in st.session_state: st.session_state.messages = []
 
-# --- 4. THE CONNECTION (No-Error Auto-Scanner) ---
+# --- 3. CONNECTION SETUP ---
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    # This scanner prevents 404 errors by picking an available model
     available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
     target = 'models/gemini-2.0-flash' if 'models/gemini-2.0-flash' in str(available) else available[0]
     model = genai.GenerativeModel(target)
     
     st.set_page_config(page_title="Executive Assistant GM", layout="wide")
-    st.title("🧠 Dynasty Assistant: FYPD & Trade Logic")
+    st.title("🧠 Dynasty Assistant: Full-Cycle GM Engine")
 
-    # SIDEBAR: FAAB & Pick Tracker
+    # SIDEBAR: The 'Living' League Controls
     with st.sidebar:
         st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
-        bid = st.number_input("Deduct FAAB:", min_value=0.0, step=1.0)
-        if st.button("Update Cash"):
-            st.session_state.faab -= bid
-            st.rerun()
-
+        bid = st.number_input("Deduct Spent Bid:", min_value=0.0, step=1.0)
+        if st.button("Update Budget"): st.session_state.faab -= bid
+        
         st.divider()
-        st.subheader("📢 Update League Memory")
-        move = st.text_input("e.g. 'Bobbys Squad traded 1.05 for Fried'")
-        if st.button("Commit Change"):
+        st.subheader("📢 Commit Roster Change")
+        move = st.text_input("Log Trade/Claim:", placeholder="e.g. 'Guti Gang claimed Kazuma Okamoto'")
+        if st.button("Sync League Brain"):
             st.session_state.history.append(move)
-            st.success("Roster state updated!")
+            st.success("State Synced!")
 
-    # 5. THE INTERFACE
-    for m in st.session_state.messages:
-        with st.chat_message(m["role"]): st.markdown(m["content"])
+    # 4. TABBED INTERFACE
+    t1, t2, t3 = st.tabs(["🔥 Trade Simulator", "📊 Roster Valuation", "🎯 FYPD Strategy"])
 
-    if prompt := st.chat_input("Analyze a trade or FYPD pick..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        st.chat_message("user").markdown(prompt)
-        
-        # Combine everything for the Assistant
-        moves_log = "\n".join(st.session_state.history)
-        full_context = f"{SYSTEM_PROMPT}\nROSTERS: {st.session_state.league_rosters}\nMOVES: {moves_log}\nUSER: {prompt}"
-        
-        with st.spinner("Analyzing surplus value and draft equity..."):
-            response = model.generate_content(full_context)
-            st.session_state.messages.append({"role": "assistant", "content": response.text})
-            st.chat_message("assistant").markdown(response.text)
+    with t1:
+        st.subheader("OOTP-Style Trade Grading")
+        if prompt := st.chat_input("Grade a trade..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            
+            # Context injection: Rules, Rosters, History, and Scoring
+            context = f"Rules: 2-C, CI, MI. Scoring: OPS, QS, SVH. Strategy: Youth Pivot 2026-28.\n" \
+                      f"ROSTERS: {FULL_ROSTERS}\nMOVES: {st.session_state.history}\nPROMPT: {prompt}"
+            
+            with st.spinner("Calculating Surplus Value..."):
+                response = model.generate_content(context)
+                st.markdown(response.text)
+
+    with t2:
+        st.subheader("Numerical Player Ratings (0-100)")
+        st.info("The Assistant analyzes every player on 'Current' vs 'Potential' impact.")
+        # Static table representation
+        st.table({"Manager": list(FULL_ROSTERS.keys()), "Star Players": [", ".join(v[:2]) for v in FULL_ROSTERS.values()]})
+
+    with t3:
+        st.subheader("FYPD Pick Valuation & Scouting")
+        st.write("**Top Priority Free Agents & Picks:**")
+        st.caption("1. 2026 Pick 1.01 - 1.03 (Valuation: 92/100)")
+        st.caption("2. Samuel Basallo (C/1B) - Target for 2-C leagues")
+        st.caption("3. Tatsuya Imai (RHP) - High-floor ZiPS 2026 impact")
 
 except Exception as e:
     st.error(f"Reasoning Engine Offline: {e}")
