@@ -73,9 +73,7 @@ def call_openrouter(model_id, persona, prompt):
     except: return "Connection Timeout."
 
 def organize_roster_ai(player_list):
-    """
-    Uses AI to sort a raw list of players into positional categories.
-    """
+    """Uses AI to sort a raw list of players into positional categories."""
     model = get_active_model()
     prompt = f"""
     You are a Fantasy Baseball Clerk. 
@@ -95,8 +93,7 @@ def organize_roster_ai(player_list):
     try:
         response = model.generate_content(prompt).text
         match = re.search(r"(\[.*\])", response, re.DOTALL)
-        if match:
-            return eval(match.group(1))
+        if match: return eval(match.group(1))
         return None
     except: return None
 
@@ -105,47 +102,38 @@ def smart_correct_vision(vision_data, full_league_data):
     Cross-references AI vision results against the official ledger.
     If the AI puts a player on the wrong side of the trade, this swaps them back.
     """
-    # 1. Identify the teams the AI found
     t_a = vision_data.get("team_a")
     t_b = vision_data.get("team_b")
     
-    # If teams aren't valid, we can't auto-correct
     if t_a not in full_league_data or t_b not in full_league_data:
         return vision_data
 
-    # 2. Flatten rosters for easy lookup
-    # Create simple lists of names for Team A and Team B from the spreadsheet
+    # Flatten rosters for easy lookup (Aggressive cleaning)
     roster_a = [p['name'].lower().strip() for p in full_league_data[t_a]]
     roster_b = [p['name'].lower().strip() for p in full_league_data[t_b]]
     
-    # 3. The Buckets (Start Empty)
     final_players_a = []
     final_players_b = []
     
-    # Combine all players the AI saw into one big pile
     all_found_players = vision_data.get("players_a", []) + vision_data.get("players_b", [])
     
-    # 4. Sort them correctly based on the Spreadsheet
     for player in all_found_players:
-        # Fuzzy match this player against both rosters to find the TRUE owner
-        # We check Team A first
-        match_a = difflib.get_close_matches(player, roster_a, n=1, cutoff=0.6)
-        match_b = difflib.get_close_matches(player, roster_b, n=1, cutoff=0.6)
+        p_clean = player.lower().strip()
+        # Fuzzy match to find true owner
+        match_a = difflib.get_close_matches(p_clean, roster_a, n=1, cutoff=0.6)
+        match_b = difflib.get_close_matches(p_clean, roster_b, n=1, cutoff=0.6)
         
         if match_a:
-            # If he is on Team A's roster, he belongs to Team A (Giving)
             final_players_a.append(player)
         elif match_b:
-            # If he is on Team B's roster, he belongs to Team B (Giving)
             final_players_b.append(player)
         else:
-            # If unknown, leave him where the AI put him originally (Fallback)
+            # Fallback to original AI guess
             if player in vision_data.get("players_a", []):
                 final_players_a.append(player)
             else:
                 final_players_b.append(player)
 
-    # 5. Return corrected structure
     return {
         "team_a": t_a,
         "players_a": final_players_a,
@@ -180,25 +168,25 @@ def parse_horizontal_rosters(matrix):
 def parse_trade_screenshot(image_file, team_names):
     """
     Uses Gemini Vision to read trade screenshots.
-    INSTRUCTION: Explicitly expands 'F. Lastname' to 'Firstname Lastname'.
+    Explicitly expands abbreviations (Z. Neto -> Zach Neto).
     """
     model = get_active_model()
     img = Image.open(image_file)
     prompt = f"""
     Analyze this fantasy baseball trade screenshot.
     
-    CRITICAL INSTRUCTION: Fantrax often abbreviates names (e.g., "Z. Neto", "J. Soto"). 
-    You MUST expand these to their full MLB names (e.g., "Zach Neto", "Juan Soto") based on your baseball knowledge.
+    CRITICAL: Fantrax often abbreviates names (e.g., "Z. Neto"). 
+    You MUST expand these to full MLB names (e.g., "Zach Neto") based on baseball knowledge.
     
-    1. Identify the two teams. Match them to this list: {team_names}
-    2. Extract the players/assets.
+    1. Identify the two teams. Match to: {team_names}
+    2. Extract the players.
     
-    Output a valid Python dictionary:
+    Output valid Python dict:
     {{
         "team_a": "Team Name",
-        "players_a": ["Full Name 1", "Full Name 2"],
+        "players_a": ["Full Name 1"],
         "team_b": "Team Name",
-        "players_b": ["Full Name 3"]
+        "players_b": ["Full Name 2"]
     }}
     """
     with st.spinner("👀 Vision Processing & Name Expansion..."):
@@ -214,7 +202,6 @@ def execute_hard_swap(matrix, team_a, players_a, team_b, players_b):
     try:
         match_a = difflib.get_close_matches(team_a, headers, n=1, cutoff=0.8)[0]
         col_a_idx = headers.index(match_a)
-        
         match_b = difflib.get_close_matches(team_b, headers, n=1, cutoff=0.8)[0]
         col_b_idx = headers.index(match_b)
     except IndexError:
@@ -244,7 +231,6 @@ def execute_hard_swap(matrix, team_a, players_a, team_b, players_b):
             matrix[r][col_a_idx] = new_col_a[r]
         else:
              if len(matrix[r]) > col_a_idx: matrix[r][col_a_idx] = ""
-
         if r < len(new_col_b):
             while len(matrix[r]) <= col_b_idx: matrix[r].append("")
             matrix[r][col_b_idx] = new_col_b[r]
@@ -270,12 +256,53 @@ def cleanup_trade_block(sh, players_traded):
         return f"Cleaned {removed_count} from Block."
     except: return "No Block found."
 
+def get_fuzzy_matches(input_names, team_players):
+    """Aggressive Matcher: Handles case, trailing spaces, and abbreviations."""
+    results = []
+    if not team_players: return [None]
+    
+    # Create normalized lookup: Key = Clean Name, Value = Original Object
+    ledger_map = {p['name'].strip().lower(): p for p in team_players}
+    ledger_names_clean = list(ledger_map.keys())
+    
+    raw_list = [n.strip() for n in input_names.split(",") if n.strip()]
+    
+    for name in raw_list:
+        clean_input = name.strip().lower()
+        match_found = None
+        
+        # 1. Exact Match
+        if clean_input in ledger_map:
+            match_found = ledger_map[clean_input]['name']
+            
+        # 2. Fuzzy Match
+        if not match_found:
+            matches = difflib.get_close_matches(clean_input, ledger_names_clean, n=1, cutoff=0.5)
+            if matches: match_found = ledger_map[matches[0]]['name']
+        
+        # 3. Abbreviation Check (Z. Neto)
+        if not match_found and "." in clean_input:
+            parts = clean_input.split(".")
+            if len(parts) >= 2:
+                first_init = parts[0].strip()
+                last_seg = parts[1].strip()
+                for real_name in ledger_names_clean:
+                    if last_seg in real_name and real_name.startswith(first_init):
+                        match_found = ledger_map[real_name]['name']
+                        break
+        
+        # 4. Result
+        if match_found:
+            match_obj = next((p for p in team_players if p['name'] == match_found), None)
+            if match_obj: results.append(match_obj)
+            else: results.append({"name": f"❌ '{name}' Error", "row": -1})
+        else: results.append({"name": f"❌ '{name}' Not Found", "row": -1})
+
+    return results
+
 # --- 5. ANALYTICS ---
 def run_gm_analysis(query, league_data, task="Trade"):
-    mandate = """
-    REALISM GATE: Elite Youth > Aging Vets.
-    If unrealistic, provide 3 SPECIFIC alternatives.
-    """
+    mandate = "REALISM GATE: Elite Youth > Aging Vets. Scout ALL 4 Ais."
     with st.spinner(f"📡 War Room: {task} Protocol..."):
         search = call_openrouter("perplexity/sonar", "Lead Sabermetrician.", f"Jan 2026 ZiPS and values for: {query}")
     brief = f"ROSTERS: {league_data}\nINTEL: {search}\nQUERY: {query}\nMANDATE: {mandate}"
@@ -294,61 +321,9 @@ def analyze_trade_block_text(block_text, user_roster):
 def analyze_trade_block_image(image_file, user_roster):
     model = get_active_model()
     img = Image.open(image_file)
-    prompt = f"""
-    Look at this Trade Block screenshot.
-    CRITICAL: Expand any abbreviated names (e.g. 'Z. Neto' -> 'Zach Neto').
-    
-    Compare the FULL names to MY ROSTER: {user_roster}.
-    Grade fit (A-F).
-    """
-    with st.spinner("👀 Expanding Names & Scanning Block..."):
+    prompt = f"Extract names. Expand abbreviations. Compare to MY ROSTER: {user_roster}. Grade fit (A-F)."
+    with st.spinner("👀 Scanning Block..."):
         return model.generate_content([prompt, img]).text
-
-def get_fuzzy_matches(input_names, team_players):
-    """
-    Advanced Matching: Handles 'Zach Neto', 'Z. Neto', and 'Neto, Zach'.
-    """
-    results = []
-    if not team_players: return [None]
-    
-    # Create lookups
-    ledger_names = [p['name'] for p in team_players]
-    
-    raw_list = [n.strip() for n in input_names.split(",") if n.strip()]
-    
-    for name in raw_list:
-        match_found = None
-        
-        # 1. Direct Fuzzy Match (The Standard Check)
-        matches = difflib.get_close_matches(name, ledger_names, n=1, cutoff=0.6)
-        if matches:
-            match_found = matches[0]
-            
-        # 2. Abbreviation Fallback (The "Z. Neto" Check)
-        if not match_found and "." in name:
-            # Split "Z. Neto" into "Z" and "Neto"
-            parts = name.split(".")
-            if len(parts) >= 2:
-                first_initial = parts[0].strip().lower() # "z"
-                last_name_segment = parts[1].strip().lower() # "neto"
-                
-                # Scan the ledger for a match
-                for real_name in ledger_names:
-                    # Check if last name is in the real name AND first letter matches
-                    if last_name_segment in real_name.lower() and real_name.lower().startswith(first_initial):
-                        match_found = real_name
-                        break
-        
-        # 3. Retrieve the object
-        if match_found:
-            match_obj = next(p for p in team_players if p['name'] == match_found)
-            results.append(match_obj)
-        else:
-            # 4. If all else fails, return a placeholder so the user can fix it
-            # We return a "Dummy" object so the code doesn't crash, but flags it
-            results.append({"name": f"❌ '{name}' Not Found", "row": -1, "col": -1})
-
-    return results
 
 # --- 6. UI DIALOGS ---
 @st.dialog("Verify Roster Sync")
@@ -391,9 +366,15 @@ try:
     gc = get_gspread_client()
     sh = gc.open_by_key(SHEET_ID)
     
-    # ⚠️ CHECK YOUR TAB ORDER HERE. Index 0 = First Tab, 1 = Second Tab
+    # ⚠️ TAB INDICES: 0=History, 1=Rosters (Adjust if needed)
     history_ws = sh.get_worksheet(0) 
     roster_ws = sh.get_worksheet(1) 
+    
+    # Sidebar Utilities
+    if st.sidebar.button("🔄 Force Refresh"): st.cache_data.clear(); st.rerun()
+    st.sidebar.divider()
+    st.sidebar.header("🛠️ Roster Inspector")
+    debug_team = st.sidebar.selectbox("Inspect Team:", ["Select..."] + TEAM_NAMES)
     
     try:
         block_ws = sh.worksheet("Trade Block")
@@ -403,7 +384,12 @@ try:
     raw_matrix = roster_ws.get_all_values()
     full_league_data = parse_horizontal_rosters(raw_matrix)
     user_roster = full_league_data.get(USER_TEAM, [])
-    model = get_active_model()
+    
+    # Sidebar Inspector Logic
+    if debug_team != "Select...":
+        r = full_league_data.get(debug_team, [])
+        st.sidebar.write(f"Found {len(r)} players.")
+        st.sidebar.code("\n".join(sorted([p['name'] for p in r])))
 
     tabs = st.tabs(["🔁 Terminal", "🔥 Analysis", "🔍 Finder", "📋 Block Monitor", "📊 Ledger", "🕵️‍♂️ Scouting", "💎 Sleepers", "🎯 Priority", "🎟️ Picks", "📜 History"])
 
@@ -412,7 +398,6 @@ try:
         st.subheader("Official Sync Terminal")
         tab_man, tab_vis = st.tabs(["🖐️ Manual Entry", "📸 Screenshot Upload"])
         
-        # MANUAL
         with tab_man:
             c1, c2 = st.columns(2)
             with c1:
@@ -423,20 +408,23 @@ try:
                 p_b = st.text_area("Giving:", key="man_pb")
             if st.button("🔥 Verify Manual Trade"):
                 if team_a not in full_league_data or team_b not in full_league_data:
-                    st.error("Team not found in spreadsheet.")
+                    st.error("Team not found.")
                 else:
                     ma = get_fuzzy_matches(p_a, full_league_data[team_a]) if p_a else []
                     mb = get_fuzzy_matches(p_b, full_league_data[team_b]) if p_b else []
-                    if None in ma or None in mb: st.error("Player not found.")
+                    if any(x.get('row') == -1 for x in ma + mb if x): st.error("Player match failed.")
                     else: verify_trade_dialog(team_a, ma, team_b, mb, roster_ws, history_ws, raw_matrix, sh)
 
-        # VISION
         with tab_vis:
+            st.info("📸 AI now auto-corrects team ownership errors.")
             up_img = st.file_uploader("Upload Trade Screenshot", type=["jpg","png"])
             if up_img:
-                data = parse_trade_screenshot(up_img, TEAM_NAMES)
-                if data:
-                    st.info("✅ Parsed. Verify details below:")
+                raw_data = parse_trade_screenshot(up_img, TEAM_NAMES)
+                if raw_data:
+                    # SMART CORRECT: Fix team mix-ups
+                    data = smart_correct_vision(raw_data, full_league_data)
+                    st.success("✅ Parsed & Validated.")
+                    
                     c1, c2 = st.columns(2)
                     with c1:
                         try: idx_a = TEAM_NAMES.index(data.get("team_a"))
@@ -452,7 +440,7 @@ try:
                     if st.button("🔥 Verify Vision Trade"):
                         ma = get_fuzzy_matches(v_pa, full_league_data[v_ta])
                         mb = get_fuzzy_matches(v_pb, full_league_data[v_tb])
-                        if None in ma or None in mb: st.error("Player match failed. Check text.")
+                        if any(x.get('row') == -1 for x in ma + mb if x): st.error("Match failed. Check spelling.")
                         else: verify_trade_dialog(v_ta, ma, v_tb, mb, roster_ws, history_ws, raw_matrix, sh)
 
     # TAB 1: ANALYSIS
@@ -485,15 +473,12 @@ try:
         if up_file and st.button("Analyze Image"):
             st.write(analyze_trade_block_image(up_file, json.dumps(user_roster)))
 
-    # TAB 4: LEDGER (BULK SORTING ENABLED)
+    # TAB 4: LEDGER (BULK SORT)
     with tabs[4]:
         st.subheader("📊 Roster Matrix")
         if raw_matrix and len(raw_matrix) > 0:
-            
-            # --- ROSTER ARCHITECT UI ---
             with st.expander("✨ Roster Architect", expanded=False):
                 col_single, col_bulk = st.columns(2)
-                
                 with col_single:
                     st.markdown("#### Single Team")
                     target_team = st.selectbox("Team:", TEAM_NAMES, key="sort_single")
@@ -512,7 +497,7 @@ try:
                                     raw_matrix[i+1][col_idx] = item
                                 roster_ws.clear(); roster_ws.update(raw_matrix)
                                 st.success(f"✅ {target_team} organized!"); time.sleep(1); st.rerun()
-                        except: st.error("Failed to sort.")
+                        except: st.error("Failed.")
 
                 with col_bulk:
                     st.markdown("#### Entire League")
@@ -535,14 +520,12 @@ try:
                         status.text("Updating Sheets..."); roster_ws.clear(); roster_ws.update(raw_matrix)
                         st.success("✅ League Organized!"); time.sleep(2); st.rerun()
 
-            # DATAFRAME DISPLAY
             headers = raw_matrix[0]
             data = raw_matrix[1:]
             df = pd.DataFrame(data, columns=headers)
             st.dataframe(df, use_container_width=True, hide_index=True)
             st.download_button("📥 Excel", convert_df_to_excel(df), "Rosters.xlsx")
-        else:
-            st.warning("⚠️ No data. Check sheet Index (0 vs 1).")
+        else: st.warning("⚠️ No data. Check sheet index.")
 
     # TAB 5: SCOUTING
     with tabs[5]:
@@ -550,19 +533,18 @@ try:
         if scout_p:
             scout_res = run_gm_analysis(f"Full scouting report for {scout_p}", json.dumps(full_league_data), "Scouting")
             c1, c2 = st.columns(2)
-            with c1: st.info("Gemini Analysis"); st.write(scout_res["Gemini"])
-            with c2: st.info("Market Consensus"); st.write(scout_res["GPT"])
+            with c1: st.info("Gemini"); st.write(scout_res["Gemini"])
+            with c2: st.info("Consensus"); st.write(scout_res["GPT"])
 
     # TAB 6: SLEEPERS
     with tabs[6]:
-        if st.button("Identify Undervalued Breakouts"):
-            sleeper_res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(full_league_data), "Sleepers")
-            st.write(sleeper_res["Gemini"])
-            st.write(sleeper_res["Claude"])
+        if st.button("Identify Breakouts"):
+            res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(full_league_data), "Sleepers")
+            st.write(res["Gemini"]); st.write(res["Claude"])
 
     # TAB 7: PRIORITY
     with tabs[7]:
-        if st.button("Generate Priority Target List"):
+        if st.button("Generate Targets"):
             res = run_gm_analysis("Who are the top 5 targets I should move for now?", json.dumps(full_league_data), "Priority")
             st.write(res["Gemini"])
 
