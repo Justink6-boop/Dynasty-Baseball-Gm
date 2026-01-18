@@ -67,6 +67,9 @@ try:
     permanent_history = history_ws.col_values(1)
     raw_roster_matrix = roster_ws.get_all_values()
 
+    # Create the "Filing Cabinet" version of your roster
+    parsed_rosters = parse_roster_matrix(raw_roster_matrix, team_list)
+
     # B. PROCESS TEAM LIST
     init_data = get_initial_league()
     team_list = list(init_data.keys())
@@ -91,28 +94,40 @@ try:
         """
         return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Report'}").text
 
-    # F. MULTI-AI WAR ROOM BRAIN
+        # F. THE DYNASTY INTELLIGENCE ENGINE
     def get_multi_ai_opinions(user_trade):
-        hybrid_directive = "STRATEGIC MISSION: Hybrid Retool. 30% 2026 win-now / 70% 2027-29 future peak."
-        full_context = f"ROSTERS: {json.dumps(parsed_rosters)}\nTRADE: {user_trade}\nMISSION: {hybrid_directive}"
-        opinions = {}
+        # STRATEGY: Rebuild mode (70% weight on 2027-2029 peak)
         
-        # Gemini
-        opinions['Gemini'] = get_gm_advice("Retool Analysis", user_trade)
+        with st.spinner("Scouting 2026 ZiPS & live Dynasty Rankings..."):
+            # STAGE 1: Live Web Search for Projections + Dynasty Tiers
+            research_query = f"""
+            Analyze {user_trade} for Dynasty Baseball. 
+            Find: 
+            1. Latest 2026 ZiPS/FanGraphs projections.
+            2. Current Jan 2026 Dynasty Rankings (FantasyPros/Dynasty Dugout).
+            3. Recent prospect news or injury updates from this week.
+            """
+            
+            # (API Call to Perplexity/Sonar for Live Intelligence)
+            live_intel = call_live_search(research_query)
 
-        if "OPENROUTER_API_KEY" in st.secrets:
-            def call_or(m_id, persona):
-                try:
-                    r = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}", "HTTP-Referer": "https://streamlit.io"},
-                        data=json.dumps({"model": m_id, "messages": [{"role":"system","content":f"{persona}\n{hybrid_directive}"}, {"role":"user","content":full_context}]}),
-                        timeout=25)
-                    return r.json()['choices'][0]['message']['content'] if r.status_code == 200 else f"Error: {r.status_code}"
-                except: return "Connection Timeout."
+        # STAGE 2: Data Synthesis (Bundling for the Coaches)
+        full_context = f"""
+        USER STRATEGY: Rebuilding for 2027 peak.
+        TRADE PROPOSAL: {user_trade}
+        LIVE SCOUTING REPORT: {live_intel}
+        
+        INSTRUCTIONS: 
+        - Cross-reference the trade with the Dynasty Rankings provided.
+        - If a prospect has jumped in the 2026 rankings (e.g., Sebastian Walcott, Konnor Griffin), prioritize them.
+        - Flag any 'Red Dots' (Injuries like Yu Darvish's 2026 UCL surgery or Jackson Jobe's TJ).
+        """
 
-            opinions['ChatGPT'] = call_or("openai/gpt-4o", "Market Bull GM.")
-            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "Window Architect Strategist.")
-            opinions['Perplexity'] = call_or("perplexity/sonar", "Statcast Performance Analyst.")
+        # STAGE 3: Specialized Coach Responses
+        opinions = {}
+        opinions['Lead Scout (Gemini)'] = model.generate_content(f"You are the Lead Scout. {full_context}").text
+        opinions['The Analyst (GPT-4o)'] = call_gm_api("openai/gpt-4o", "Data-driven GM focus on ZiPS.", full_context)
+        opinions['The Strategist (Claude 3.5)'] = call_gm_api("anthropic/claude-3.5-sonnet", "Dynasty value specialist.", full_context)
         
         return opinions
 
