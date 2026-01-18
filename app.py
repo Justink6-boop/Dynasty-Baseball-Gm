@@ -74,9 +74,19 @@ try:
     # C. PARSE ROSTERS
     parsed_rosters = parse_roster_matrix(raw_roster_matrix, team_list)
 
-    # D. AI CONFIGURATION
+        # D. AI CONFIGURATION (Self-Healing Model Selection)
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    # This loop finds the active flash model automatically
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # Prioritize flash models for speed
+        flash_models = [m for m in available_models if 'flash' in m]
+        model_to_use = flash_models[0] if flash_models else available_models[0]
+        model = genai.GenerativeModel(model_to_use)
+    except Exception as e:
+        # Fallback to the most standard global name if listing fails
+        model = genai.GenerativeModel('gemini-pro')
 
     # E. HELPER FUNCTIONS
     def call_openrouter(model_id, persona, prompt):
