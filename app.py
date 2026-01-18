@@ -95,11 +95,11 @@ try:
                     return "GM Busy."
                 except: return "GM Offline."
 
-            # CALLING THE GMs
-            opinions['ChatGPT'] = call_or("openai/gpt-4o", "Aggressive GM focused on market value.")
-            opinions['Claude'] = call_or("anthropic/claude-3-opus", "Conservative strategist focused on injury risk.")
-            opinions['Perplexity'] = call_or("perplexity/sonar-reasoning", "Data researcher focused on Statcast trends.")
-        
+                        # FREE VERSION CALLS
+            opinions['ChatGPT'] = call_or("google/gemini-2.0-flash-exp:free", "Aggressive GM focused on market value and how return fits into current plan of young talent while looking to the future.")
+            opinions['Claude'] = call_or("anthropic/claude-3-haiku:free", "Conservative strategist focused on injury risk and how the trade would benefit now versus later.")
+            opinions['Perplexity'] = call_or("meta-llama/llama-3.1-8b-instruct:free", "Data researcher focused on Statcast trends and the fantasy outlook based on if the trade was completed versus if it wasn't. If they should not complete this trade, list other possible avenues.")
+
         return opinions
 
     # --- 4. SIDEBAR ---
