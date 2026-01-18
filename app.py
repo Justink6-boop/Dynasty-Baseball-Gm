@@ -8,7 +8,6 @@ from io import BytesIO
 # --- 1. CONNECTION & UTILITY ENGINE ---
 def get_gspread_client():
     info = dict(st.secrets["gcp_service_account"])
-    # Self-healing logic for iOS browser formatting issues
     key = info["private_key"].replace("\\n", "\n")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(info, scopes=scopes)
@@ -22,7 +21,7 @@ def convert_df_to_excel(df):
 
 SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A" 
 
-# --- 2. MASTER LEAGUE LEDGER (Rosters for AI Context) ---
+# --- 2. MASTER LEAGUE LEDGER ---
 def get_initial_league():
     return {
         "Witness Protection (Me)": {
@@ -90,7 +89,10 @@ def get_initial_league():
         }
     }
 
-# --- 3. THE LIVE GM ENGINE ---
+# --- 3. PAGE CONFIG ---
+st.set_page_config(page_title="Executive Assistant GM", layout="wide")
+st.title("🧠 Dynasty GM Suite: Executive Terminal")
+
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 
 try:
@@ -103,49 +105,30 @@ try:
     permanent_history = history_ws.col_values(1)
     raw_roster_matrix = roster_ws.get_all_values()
 
+    # Define the export_df for team lists before starting tabs
+    init_data = get_initial_league()
+    flat_data = {team: [p for pos in players.values() if isinstance(pos, list) for p in pos] + players.get("Draft Picks", []) for team, players in init_data.items()}
+    export_df = pd.DataFrame.from_dict(flat_data, orient='index').transpose()
+    team_list = list(export_df.columns)
+
     # B. AI CONFIGURATION
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    flash_models = [m for m in available_models if 'flash' in m]
-    model = genai.GenerativeModel(flash_models[0] if flash_models else 'gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
-    # SHARED GM BRAIN (ZiPS/FanGraphs Focused)
+    # SHARED GM BRAIN
     def get_gm_advice(category, user_input=""):
-        context = f"""
-        LIVE_ROSTERS: {raw_roster_matrix}
-        HISTORY: {permanent_history}
-        REFERENCE: {get_initial_league()}
-        METRICS: ZiPS 2026-2028 Projections, Statcast, FanGraphs Depth Charts.
-        GOAL: Dynasty Youth Pivot / Rebuild Window.
-        SCORING: 6x6 Category (OPS, QS focus). No Salary constraints.
-        TASK: {category}
-        """
-        full_query = f"{context}\nUser Input: {user_input if user_input else 'Generate Strategic Report'}"
-        return model.generate_content(full_query).text
+        context = f"LIVE_ROSTERS: {raw_roster_matrix}\nHISTORY: {permanent_history}\nMETRICS: ZiPS/FanGraphs Dynasty Fit (2026-28 Window)\nTASK: {category}"
+        return model.generate_content(f"{context}\nInput: {user_input}").text
 
     # --- 4. SIDEBAR ---
     with st.sidebar:
         st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
         spent = st.number_input("Log Spending:", min_value=0.0)
         if st.button("Update Budget"): st.session_state.faab -= spent
-
         st.divider()
-        st.subheader("📢 Log Transaction")
-        move = st.text_input("Trade/Claim:", placeholder="e.g. 'Fried for Skenes'")
-        if st.button("Update Live Database"):
-            with st.spinner("AI GM is re-writing the league ledger..."):
-                update_prompt = f"DATA: {raw_roster_matrix}\nMOVE: {move}\nReturn ONLY the updated list of lists."
-                response = model.generate_content(update_prompt)
-                try:
-                    new_list = eval(response.text.strip())
-                    roster_ws.clear()
-                    roster_ws.update(new_list)
-                    history_ws.append_row([move])
-                    st.success("Synced to Cloud!")
-                    st.rerun()
-                except: st.error("AI returned invalid format. Please try again.")
+        st.info("💡 Use the 'Transaction Terminal' tab to log trades and roster moves.")
 
-        # --- 5. THE EXECUTIVE SUITE TABS ---
+    # --- 5. THE EXECUTIVE SUITE TABS ---
     tabs = st.tabs([
         "🔁 Transaction Terminal", 
         "🔥 Trade Analysis", 
@@ -153,116 +136,86 @@ try:
         "🎯 Priority Candidates", 
         "🕵️‍♂️ Full Scouting", 
         "💎 Sleeper Cell", 
-        "📈 Priority FAs", 
         "📜 History Log"
     ])
 
-    # --- TAB 0: TRANSACTION TERMINAL (NEW) ---
+    # --- TAB 0: TRANSACTION TERMINAL ---
     with tabs[0]:
         st.subheader("Official League Transaction Terminal")
-        
-        # Toggle between Trade and Waiver
-        trans_type = st.radio("Select Transaction Type:", ["Trade", "Waiver/Drop"], horizontal=True)
+        trans_type = st.radio("Select Action Type:", ["Trade", "Waiver/Drop"], horizontal=True)
         
         if trans_type == "Trade":
             col1, col2 = st.columns(2)
-            # Use export_df columns for the dropdown list of teams
-            team_list = list(export_df.columns)
             with col1:
-                team_a = st.selectbox("From Team:", team_list, key="ta_terminal")
-                players_out = st.text_area("Players/Picks Leaving Team A:", placeholder="One per line", key="out_terminal")
+                team_a = st.selectbox("From Team:", team_list, key="ta_term")
+                players_out = st.text_area("Players Leaving Team A:", placeholder="One per line", key="out_term")
             with col2:
-                team_b = st.selectbox("To Team:", team_list, key="tb_terminal")
-                players_in = st.text_area("Players/Picks Leaving Team B:", placeholder="One per line", key="in_terminal")
+                team_b = st.selectbox("To Team:", team_list, key="tb_term")
+                players_in = st.text_area("Players Leaving Team B:", placeholder="One per line", key="in_term")
 
             if st.button("Execute Trade & Sync"):
                 if team_a == team_b:
-                    st.error("Teams must be different!")
+                    st.error("Select different teams.")
                 else:
-                    with st.spinner("Processing official move..."):
-                        update_prompt = f"""
-                        DATA: {raw_roster_matrix}
-                        ACTION: Move these players: {players_out} FROM {team_a} TO {team_b}.
-                        ACTION: Move these players: {players_in} FROM {team_b} TO {team_a}.
-                        TASK: Return ONLY the updated Python list of lists. No conversational text.
-                        """
-                        response = model.generate_content(update_prompt).text
-                        clean_response = response.replace("```python", "").replace("```", "").strip()
+                    with st.spinner("Processing trade..."):
+                        prompt = f"DATA: {raw_roster_matrix}\nACTION: Move {players_out} FROM {team_a} TO {team_b}. Move {players_in} FROM {team_b} TO {team_a}. Return ONLY Python list of lists."
+                        response = model.generate_content(prompt).text
+                        clean = response.replace("```python", "").replace("```", "").strip()
                         try:
-                            new_list = eval(clean_response)
+                            new_list = eval(clean)
                             roster_ws.clear()
                             roster_ws.update(new_list)
-                            
-                            log_entry = f"TRADE: {team_a} sends {players_out.strip()} to {team_b} for {players_in.strip()}"
-                            history_ws.append_row([log_entry])
-                            st.success(f"Successfully processed: {team_a} ↔️ {team_b}")
+                            history_ws.append_row([f"TRADE: {team_a} ↔️ {team_b}"])
+                            st.success("Synced!")
                             st.rerun()
-                        except:
-                            st.error("Execution failed. Check player name spelling or AI format.")
+                        except: st.error("Spelling or Format error.")
 
-        else:  # Waiver/Drop Logic
+        else: # Waiver Logic
             col1, col2 = st.columns(2)
             with col1:
-                target_team = st.selectbox("Select Team:", list(export_df.columns), key="waiver_team")
-                action = st.selectbox("Action:", ["Add", "Drop"], key="waiver_action")
+                t_team = st.selectbox("Team:", team_list)
+                act = st.selectbox("Action:", ["Add", "Drop"])
             with col2:
-                player_name = st.text_input("Player Name:", key="waiver_player")
+                p_name = st.text_input("Player Name:")
             
-            if st.button("Submit Waiver/Drop"):
-                with st.spinner("Updating Roster..."):
-                    if action == "Add":
-                        prompt = f"DATA: {raw_roster_matrix}\nACTION: Add {player_name} to {target_team}. Return ONLY the Python list of lists."
-                    else:
-                        prompt = f"DATA: {raw_roster_matrix}\nACTION: Remove {player_name} from {target_team}. Return ONLY the Python list of lists."
-                    
+            if st.button("Submit Waiver Move"):
+                with st.spinner("Updating..."):
+                    prompt = f"DATA: {raw_roster_matrix}\nACTION: {act} {p_name} to/from {t_team}. Return ONLY Python list of lists."
                     response = model.generate_content(prompt).text
-                    clean_response = response.replace("```python", "").replace("```", "").strip()
+                    clean = response.replace("```python", "").replace("```", "").strip()
                     try:
-                        new_list = eval(clean_response)
+                        new_list = eval(clean)
                         roster_ws.clear()
                         roster_ws.update(new_list)
-                        history_ws.append_row([f"{action.upper()}: {player_name} ({target_team})"])
-                        st.success(f"Player {action}ed successfully!")
+                        history_ws.append_row([f"{act.upper()}: {p_name} ({t_team})"])
+                        st.success("Roster Updated!")
                         st.rerun()
-                    except:
-                        st.error("Action failed. The AI had trouble updating the list format.")
+                    except: st.error("Spelling or Format error.")
 
-    # --- REMAINING TABS (Analysis, Ledger, Scouting, etc.) ---
+    # --- OTHER TABS ---
     with tabs[1]:
-        st.subheader("Trade Grading (ZiPS & FanGraphs Context)")
-        trade_grade = st.chat_input("Analyze a trade or get suggestions...")
-        if trade_grade:
-            st.markdown(get_gm_advice("Trade Negotiation & Grading", trade_grade))
+        st.subheader("OOTP-Style Trade Consultant")
+        trade_q = st.chat_input("Analyze this trade...")
+        if trade_q: st.markdown(get_gm_advice("Trade Grading", trade_q))
 
     with tabs[2]:
-        st.subheader("Current Database Status")
-        st.download_button(
-            label="📥 Download Initial Excel Template",
-            data=convert_df_to_excel(export_df),
-            file_name="Dynasty_League_Database.xlsx"
-        )
+        st.subheader("Live Database Status")
+        st.download_button(label="📥 Download Template", data=convert_df_to_excel(export_df), file_name="League_Rosters.xlsx")
         st.dataframe(pd.DataFrame(raw_roster_matrix), use_container_width=True)
 
     with tabs[3]:
-        st.subheader("Top Trade Targets (ZiPS Buy-Lows)")
-        if st.button("Generate Trade Target List"):
-            st.markdown(get_gm_advice("Priority Trade Candidates - ZiPS Optimized"))
+        if st.button("Generate Trade Target List"): st.markdown(get_gm_advice("ZiPS Buy-Lows"))
 
     with tabs[4]:
-        st.subheader("Fit & Scouting Report")
-        player_q = st.text_input("Enter Player Name:", key="scouting_search")
-        if player_q:
-            st.markdown(get_gm_advice("Scouting Fit Analysis", player_q))
+        scout_p = st.text_input("Enter Player for Fit Analysis:")
+        if scout_p: st.markdown(get_gm_advice("Scouting Fit Analysis", scout_p))
 
     with tabs[5]:
-        st.subheader("Dynasty Sleeper Hub")
-        if st.button("Scout Sleepers"):
-            st.markdown(get_gm_advice("2026-2028 Sleeper Identification"))
+        if st.button("Find Dynasty Sleepers"): st.markdown(get_gm_advice("2026-28 Sleepers"))
 
     with tabs[6]:
         st.subheader("Transaction History")
-        for trade in permanent_history[::-1]:
-            st.write(f"✅ {trade}")
+        for trade in permanent_history[::-1]: st.write(f"✅ {trade}")
 
 except Exception as e:
     st.error(f"Executive System Offline: {e}")
