@@ -1,13 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- 1. THE COMPLETE LEAGUE DATABASE (From Your Document) ---
-FULL_ROSTERS = {
-    import streamlit as st
-import google.generativeai as genai
-
 # --- 1. THE MASTER LEAGUE LEDGER (All 10 Teams) ---
-# Pre-loaded with every player from your PDF for instant numerical valuation
+# [span_3](start_span)[span_4](start_span)[span_5](start_span)Pre-loaded with every player from your document for instant numerical valuation [cite: 1-17]
 FULL_LEAGUE_DB = {
     "Witness Protection (Me)": {
         "Catchers": ["Dillon Dingler", "J.T. Realmuto"],
@@ -67,26 +62,19 @@ FULL_LEAGUE_DB = {
         "Catchers": ["Patrick Bailey", "Austin Wells", "Bo Naylor"],
         "Infielders": ["Christian Walker (1B)", "Brandon Lowe (2B)", "Ryan McMahon (3B)", "Jeremy Pena (SS)", "Max Muncy (3B)", "Masyn Winn (SS)", "Luis Arraez (1B)", "Rhys Hoskins (1B)", "Thairo Estrada (2B)", "Luis Rengifo (2B, 3B)", "Amed Rosario (3B)", "Jose Caballero (2B, 3B, SS, OF)"],
         "Outfielders": ["Wilyer Abreu", "Randy Arozarena", "Sal Frelick", "Lourdes Gurriel Jr.", "Taylor Ward", "Josh Lowe", "Jose Siri"],
-        "Pitchers": ["Erick Fedde", "Yusei Kikuchi", "Jesus Luzardo", "Bailey Ober", "Ryan Pepiot", "Freddy Peralta", "Nick Pivetta", "J.P. Sears", "Tomoyuki Sugano", "Griffin Canning", "Nestor Cortes Jr.", "Clarke Schmidt", "Taijuan Walker", "Simeon Woods-Richardson", "Ryan Pressly", "Alex Cobb", " Josiah Gray", "Shane McClanahan", "John Means", "Dane Dunning", "Martin Perez"]
+        "Pitchers": ["Erick Fedde", "Yusei Kikuchi", "Jesus Luzardo", "Bailey Ober", "Ryan Pepiot", "Freddy Peralta", "Nick Pivetta", "J.P. Sears", "Tomoyuki Sugano", "Griffin Canning", "Nestor Cortes Jr.", "Clarke Schmidt", "Taijuan Walker", "Simeon Woods-Richardson", "Ryan Pressly", "Alex Cobb", "Josiah Gray", "Shane McClanahan", "John Means", "Dane Dunning", "Martin Perez"]
     }
 }
 
-# --- 2. LIVE LEAGUE STATE ---
-# This dictionary will now accurately update for every team in the league
-if "league_rosters" not in st.session_state:
-    st.session_state.league_rosters = FULL_LEAGUE_DB
-
-# --- 3. SCORING & VALUATION LOGIC ---
-# Numerical value calculation for 6x6 scoring: HR, RBI, R, SB, AVG, OPS | QS, BAA, ERA, SVH, K/9, WHIP
+# --- 2. LIVE STATE & SCORING ---
 SCORING_CONTEXT = """
-SCORING RULES: 
-Hitting: HR, RBI, R, SB, Batting Average (AVG), OPS.
-Pitching: Quality Starts (QS), Batting Average Against (BAA), ERA, Saves + Holds (SVH), K/9, WHIP.
+SCORING (6x6):
+- Hitting: HR, RBI, R, SB, AVG, OPS (Weight: 1)
+- Pitching: QS, BAA, ERA, SVH, K/9, WHIP (Weight: 1)
+RULES: 2-C, 1B, 2B, 3B, SS, CI, MI, 3 OF, 2 UTIL.
+FYPD VALUATION: 1.01-1.03 (92+ Value), Mid-1st (75-85), 2nd Round (45-60).
 """
 
-}
-
-# --- 2. PERMANENT MEMORY & SCORING ---
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 if "history" not in st.session_state: st.session_state.history = []
 if "messages" not in st.session_state: st.session_state.messages = []
@@ -98,50 +86,49 @@ try:
     target = 'models/gemini-2.0-flash' if 'models/gemini-2.0-flash' in str(available) else available[0]
     model = genai.GenerativeModel(target)
     
-    st.set_page_config(page_title="Executive Assistant GM", layout="wide")
+    st.set_page_config(page_title="Executive GM Engine", layout="wide")
     st.title("🧠 Dynasty Assistant: Full-Cycle GM Engine")
 
-    # SIDEBAR: The 'Living' League Controls
+    # SIDEBAR: Living Controls
     with st.sidebar:
         st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
-        bid = st.number_input("Deduct Spent Bid:", min_value=0.0, step=1.0)
-        if st.button("Update Budget"): st.session_state.faab -= bid
+        bid = st.number_input("Deduct Bid:", min_value=0.0, step=1.0)
+        if st.button("Update Cash"): 
+            st.session_state.faab -= bid
+            st.rerun()
         
         st.divider()
-        st.subheader("📢 Commit Roster Change")
-        move = st.text_input("Log Trade/Claim:", placeholder="e.g. 'Guti Gang claimed Kazuma Okamoto'")
-        if st.button("Sync League Brain"):
+        st.subheader("📢 Commit Transaction")
+        move = st.text_input("Log Trade/Claim:", placeholder="e.g. 'Bobbys Squad claimed Samuel Basallo'")
+        if st.button("Sync Brain"):
             st.session_state.history.append(move)
             st.success("State Synced!")
 
     # 4. TABBED INTERFACE
-    t1, t2, t3 = st.tabs(["🔥 Trade Simulator", "📊 Roster Valuation", "🎯 FYPD Strategy"])
+    t1, t2, t3 = st.tabs(["🔥 Trade & FYPD Simulator", "📊 Roster Valuation", "🎯 FAAB & Scouting"])
 
     with t1:
-        st.subheader("OOTP-Style Trade Grading")
-        if prompt := st.chat_input("Grade a trade..."):
+        st.subheader("OOTP-Style Trade & Draft Grading")
+        if prompt := st.chat_input("Grade a trade or pick..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             
-            # Context injection: Rules, Rosters, History, and Scoring
-            context = f"Rules: 2-C, CI, MI. Scoring: OPS, QS, SVH. Strategy: Youth Pivot 2026-28.\n" \
-                      f"ROSTERS: {FULL_ROSTERS}\nMOVES: {st.session_state.history}\nPROMPT: {prompt}"
+            context = f"{SCORING_CONTEXT}\nROSTERS: {FULL_LEAGUE_DB}\nMOVES: {st.session_state.history}\nPROMPT: {prompt}"
             
-            with st.spinner("Calculating Surplus Value..."):
+            with st.spinner("Simulating Surplus Value..."):
                 response = model.generate_content(context)
                 st.markdown(response.text)
 
     with t2:
         st.subheader("Numerical Player Ratings (0-100)")
-        st.info("The Assistant analyzes every player on 'Current' vs 'Potential' impact.")
-        # Static table representation
-        st.table({"Manager": list(FULL_ROSTERS.keys()), "Star Players": [", ".join(v[:2]) for v in FULL_ROSTERS.values()]})
+        st.info("Ratings are calculated on 2026 Current vs 2027-2028 Potential impact.")
+        st.table({"Manager": list(FULL_LEAGUE_DB.keys()), "Star Players": [", ".join(v['Infielders'][:2]) for v in FULL_LEAGUE_DB.values()]})
 
     with t3:
-        st.subheader("FYPD Pick Valuation & Scouting")
-        st.write("**Top Priority Free Agents & Picks:**")
-        st.caption("1. 2026 Pick 1.01 - 1.03 (Valuation: 92/100)")
-        st.caption("2. Samuel Basallo (C/1B) - Target for 2-C leagues")
-        st.caption("3. Tatsuya Imai (RHP) - High-floor ZiPS 2026 impact")
+        st.subheader("Living FAAB & Scout Recommendations")
+        st.write(f"**Current Strategy:** Hard Youth Pivot (2026-28 Window)")
+        st.caption("1. PRIORITY FREE AGENT: Samuel Basallo (C/1B) - 94 OOTP Potential")
+        st.caption("2. FYPD TARGET: Tatsuya Imai (RHP) - High-floor 2026 ZiPS impact")
+        st.caption("3. TRADE PROJECT: Target Bobby Witt Jr. SS surplus from Bobbys Squad")
 
 except Exception as e:
     st.error(f"Reasoning Engine Offline: {e}")
