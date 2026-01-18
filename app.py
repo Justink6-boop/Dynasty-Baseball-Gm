@@ -79,9 +79,17 @@ try:
     # Read persistent history from the Google Sheet
     permanent_history = worksheet.col_values(1)
     
-    # Configure Gemini
+        # Configure Gemini
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    # DYNAMIC PICKER: Find the best available Flash model
+    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    
+    # Try to find a 'flash' model first, otherwise use the first available one
+    flash_models = [m for m in available_models if 'flash' in m]
+    model_to_use = flash_models[0] if flash_models else available_models[0]
+    
+    model = genai.GenerativeModel(model_to_use)
 
     # SIDEBAR: Permanent Logging & FAAB
     with st.sidebar:
