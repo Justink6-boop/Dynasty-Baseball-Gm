@@ -71,7 +71,7 @@ try:
         context = f"LIVE_ROSTERS: {raw_roster_matrix}\nMETRICS: ZiPS/FanGraphs Dynasty\nTASK: {category}"
         return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Report'}").text
 
-     # E. MULTI-AI WAR ROOM BRAIN
+         # E. MULTI-AI WAR ROOM BRAIN
     def get_multi_ai_opinions(user_trade):
         context = f"LIVE_ROSTERS: {raw_roster_matrix}\nTRADE: {user_trade}"
         opinions = {}
@@ -79,14 +79,14 @@ try:
         # GM 1: Gemini (Standard)
         opinions['Gemini'] = get_gm_advice("ZiPS Statistical Analysis", user_trade)
 
-        if "OPENROUTER_API_KEY" in st.session_state or "OPENROUTER_API_KEY" in st.secrets:
-            api_key = st.secrets.get("OPENROUTER_API_KEY")
+        if "OPENROUTER_API_KEY" in st.secrets:
+            api_key = st.secrets["OPENROUTER_API_KEY"]
             
             def call_or(model_id, persona):
                 headers = {
                     "Authorization": f"Bearer {api_key}",
-                    "HTTP-Referer": "https://dynasty-gm-suite.streamlit.app", # Identifies your app
-                    "X-Title": "Dynasty GM Suite", # App name for OpenRouter logs
+                    "HTTP-Referer": "https://streamlit.io",
+                    "X-Title": "Dynasty GM Suite",
                     "Content-Type": "application/json"
                 }
                 payload = {
@@ -94,8 +94,7 @@ try:
                     "messages": [
                         {"role": "system", "content": persona},
                         {"role": "user", "content": f"Context: {context}\nAnalyze this trade."}
-                    ],
-                    "temperature": 0.7
+                    ]
                 }
                 try:
                     r = requests.post(
@@ -107,17 +106,14 @@ try:
                     if r.status_code == 200:
                         return r.json()['choices'][0]['message']['content']
                     else:
-                        # This will show you exactly why it's failing (e.g., 401, 402, 429)
-                        return f"GM Error {r.status_code}: {r.json().get('error', {}).get('message', 'Unknown error')}"
+                        return f"GM Error {r.status_code}: {r.text[:50]}"
                 except Exception as e:
                     return f"Connection Timeout: {e}"
 
-            # UPDATED PAID MODEL PATHS
-            opinions['ChatGPT'] = call_or("openai/gpt-4o", "You are an aggressive GM focused on pure market value.")
-            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "You are a conservative strategist focused on long-term risk.")
-            # Updated Perplexity ID (Current 2026 Stable Version)
-opinions['Perplexity'] = call_or("perplexity/sonar", "You are a data researcher focused on Statcast trends and news.")
-
+            # NOW we call the GMs after the function is fully defined
+            opinions['ChatGPT'] = call_or("openai/gpt-4o", "Aggressive GM focused on pure market value and if the current proposed trade puts us in a good position for now and the future. Respond saying YES or NO and grades the trade on a letter scale.")
+            opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "Conservative strategist focused on long-term risk. Explains the potential negatives of the trade while also highlighting why this could be good. Respond saying YES or NO and grades the trade on a letter scale.")
+            opinions['Perplexity'] = call_or("perplexity/sonar", "Data researcher focused on Statcast trends and news. Explains how this proposed trade impacts this years projected fantasy production as well as future fantasy productions. Respond saying YES or NO and grades the trade on a letter scale.")
         
         return opinions
 
