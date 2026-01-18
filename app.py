@@ -92,6 +92,11 @@ try:
     st.set_page_config(page_title="Executive Assistant GM", layout="wide")
     st.title("🧠 Dynasty Assistant: Permanent Living Ledger")
 
+if "gcp_service_account" not in st.secrets:
+    st.error("Secrets not found! Check your Streamlit Cloud Dashboard.")
+else:
+    st.success("Credentials detected. Attempting to connect to Google...")
+
     # SIDEBAR: Living Controls & Transaction Commit
     with st.sidebar:
         st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
