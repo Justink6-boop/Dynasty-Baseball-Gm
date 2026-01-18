@@ -252,16 +252,49 @@ def analyze_trade_block_image(image_file, user_roster):
         return model.generate_content([prompt, img]).text
 
 def get_fuzzy_matches(input_names, team_players):
+    """
+    Advanced Matching: Handles 'Zach Neto', 'Z. Neto', and 'Neto, Zach'.
+    """
     results = []
     if not team_players: return [None]
+    
+    # Create lookups
     ledger_names = [p['name'] for p in team_players]
+    
     raw_list = [n.strip() for n in input_names.split(",") if n.strip()]
+    
     for name in raw_list:
+        match_found = None
+        
+        # 1. Direct Fuzzy Match (The Standard Check)
         matches = difflib.get_close_matches(name, ledger_names, n=1, cutoff=0.6)
         if matches:
-            match_obj = next(p for p in team_players if p['name'] == matches[0])
+            match_found = matches[0]
+            
+        # 2. Abbreviation Fallback (The "Z. Neto" Check)
+        if not match_found and "." in name:
+            # Split "Z. Neto" into "Z" and "Neto"
+            parts = name.split(".")
+            if len(parts) >= 2:
+                first_initial = parts[0].strip().lower() # "z"
+                last_name_segment = parts[1].strip().lower() # "neto"
+                
+                # Scan the ledger for a match
+                for real_name in ledger_names:
+                    # Check if last name is in the real name AND first letter matches
+                    if last_name_segment in real_name.lower() and real_name.lower().startswith(first_initial):
+                        match_found = real_name
+                        break
+        
+        # 3. Retrieve the object
+        if match_found:
+            match_obj = next(p for p in team_players if p['name'] == match_found)
             results.append(match_obj)
-        else: results.append(None)
+        else:
+            # 4. If all else fails, return a placeholder so the user can fix it
+            # We return a "Dummy" object so the code doesn't crash, but flags it
+            results.append({"name": f"❌ '{name}' Not Found", "row": -1, "col": -1})
+
     return results
 
 # --- 6. UI DIALOGS ---
