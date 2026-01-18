@@ -101,34 +101,59 @@ try:
         }
 
     # --- 5. UI TABS ---
-    tabs = st.tabs(["🔁 Terminal", "🔥 Trade Analysis", "🔍 Trade Finder", "📋 Ledger", "🎯 Priority", "🕵️‍♂️ Scouting", "💎 Sleepers", "📜 History"])
+with st.sidebar:
+    st.header(f"💰 FAAB: ${st.session_state.get('faab', 200.00):.2f}")
+    spent = st.number_input("Log Spending:", min_value=0.0, key="faab_spend")
+    if st.button("Update Budget", key="update_faab_btn"):
+        st.session_state.faab = st.session_state.get('faab', 200.00) - spent
 
-    # --- TAB 1: TWO-SIDED ANALYSIS ---
-    with tabs[1]:
-        st.subheader("⚖️ Two-Sided Trade Arbitrator")
-        trade_q = st.chat_input("Enter trade: (e.g., 'My Fried for his Skenes')")
-        if trade_q:
-            results = get_multi_ai_opinions(trade_q)
-            with st.expander("📡 Live Field Report", expanded=True): st.write(results['Perplexity'])
-            st.divider()
-            c1, c2, c3 = st.columns(3)
-            with c1: st.info("🟢 Gemini (Fairness)"); st.write(results['Gemini'])
-            with c2: st.info("🔵 GPT-4o (Value)"); st.write(results['ChatGPT'])
-            with c3: st.info("🟠 Claude (Fit)"); st.write(results['Claude'])
+# Ensure all 8 tabs are defined
+tabs = st.tabs(["🔁 Terminal", "🔥 Analysis", "🔍 Finder", "📋 Ledger", "🎯 Priority", "🕵️‍♂️ Scouting", "💎 Sleepers", "📜 History"])
 
-    # --- TAB 2: TRADE FINDER ---
-    with tabs[2]:
-        st.subheader("🔍 Automated Trade Finder")
+# --- TAB 0: TRANSACTION TERMINAL ---
+with tabs[0]:
+    st.subheader("Official League Transaction Terminal")
+    trans_type = st.radio("Action:", ["Trade", "Waiver/Drop"], horizontal=True, key="trans_type_radio")
+    
+    if trans_type == "Trade":
         col1, col2 = st.columns(2)
         with col1:
-            target_need = st.selectbox("I am looking for:", ["Elite Prospects (<23)", "Impact Youth (23-25)", "Draft Capital", "2026 Pitching"])
+            team_a = st.selectbox("From Team:", team_list, key="ta_term_v2")
+            p_out = st.text_area("Leaving Team A:", key="po_term_v2")
         with col2:
-            offering = st.text_input("I am willing to offer:", placeholder="e.g. Max Fried, veterans, 2026 picks")
+            team_b = st.selectbox("To Team:", team_list, key="tb_term_v2")
+            p_in = st.text_area("Leaving Team B:", key="pi_term_v2")
         
-        if st.button("Scour League for Partners"):
-            finder_prompt = f"LEAGUE_ROSTERS: {json.dumps(parsed_rosters)}\nNEED: {target_need}\nOFFER: {offering}\nTASK: Identify 3 realistic trade partners. Explain why it makes sense for THEM based on their current roster depth."
-            results = get_multi_ai_opinions(finder_prompt, "Trade Finder")
-            st.markdown(results['Gemini'])
+        if st.button("Execute Trade", key="exec_trade_btn"):
+            st.info("Syncing Trade...") # Add actual trade logic here
+    else:
+        t_team = st.selectbox("Team:", team_list, key="wt_term_v2")
+        act = st.selectbox("Action:", ["Add", "Drop"], key="wa_term_v2")
+        p_name = st.text_input("Player Name:", key="wp_term_v2")
+        if st.button("Submit Move", key="submit_move_btn"):
+            st.info(f"Processing {act}...")
+
+# --- TAB 1: TRADE ANALYSIS ---
+with tabs[1]:
+    st.subheader("🚀 War Room: Live 2026 Intelligence")
+    trade_q = st.chat_input("Analyze trade... (e.g. My Fried for his Skenes)", key="trade_analysis_input")
+    if trade_q:
+        results = get_multi_ai_opinions(trade_q)
+        with st.expander("📡 Live Field Report", expanded=True):
+            st.write(results['Perplexity'])
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        with c1: st.info("🟢 Gemini"); st.write(results['Gemini'])
+        with c2: st.info("🔵 GPT-4o"); st.write(results['ChatGPT'])
+        with c3: st.info("🟠 Claude"); st.write(results['Claude'])
+
+# --- TAB 2: TRADE FINDER ---
+with tabs[2]:
+    st.subheader("🔍 Automated Trade Partner Finder")
+    target_need = st.selectbox("Looking for:", ["Prospects", "2026 Pitching", "Draft Capital"], key="finder_need")
+    offering = st.text_input("Offering:", key="finder_offer")
+    if st.button("Scour League", key="scour_league_btn"):
+        st.write("Finding partners...")
 
     # (Other tabs remain as previously configured)
     with tabs[0]:
