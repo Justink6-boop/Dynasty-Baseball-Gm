@@ -1,8 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- 1. THE MASTER LEAGUE LEDGER (All 10 Teams) ---
-# [span_3](start_span)[span_4](start_span)[span_5](start_span)Pre-loaded with every player from your document for instant numerical valuation [cite: 1-17]
+# --- 1. THE COMPLETE MASTER LEAGUE LEDGER (All 10 Teams) ---
+# Pre-loaded with every player from your provided PDF document
 FULL_LEAGUE_DB = {
     "Witness Protection (Me)": {
         "Catchers": ["Dillon Dingler", "J.T. Realmuto"],
@@ -66,69 +66,86 @@ FULL_LEAGUE_DB = {
     }
 }
 
-# --- 2. LIVE STATE & SCORING ---
-SCORING_CONTEXT = """
-SCORING (6x6):
-- Hitting: HR, RBI, R, SB, AVG, OPS (Weight: 1)
-- Pitching: QS, BAA, ERA, SVH, K/9, WHIP (Weight: 1)
-RULES: 2-C, 1B, 2B, 3B, SS, CI, MI, 3 OF, 2 UTIL.
-FYPD VALUATION: 1.01-1.03 (92+ Value), Mid-1st (75-85), 2nd Round (45-60).
-"""
+# --- 2. LOGIC & MEMORY ---
+SCORING = "6x6: HR, RBI, R, SB, AVG, OPS | QS, BAA, ERA, SVH, K/9, WHIP"
+STRATEGY = "2026-2028 Youth Pivot. High Value on 2-C, CI, MI."
 
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 if "history" not in st.session_state: st.session_state.history = []
-if "messages" not in st.session_state: st.session_state.messages = []
 
-# --- 3. CONNECTION SETUP ---
+# --- 3. CONNECTION ---
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
     target = 'models/gemini-2.0-flash' if 'models/gemini-2.0-flash' in str(available) else available[0]
     model = genai.GenerativeModel(target)
     
-    st.set_page_config(page_title="Executive GM Engine", layout="wide")
-    st.title("🧠 Dynasty Assistant: Full-Cycle GM Engine")
+    st.set_page_config(page_title="Executive GM Suite", layout="wide")
+    st.title("🧠 Dynasty Assistant: Executive GM Engine")
 
-    # SIDEBAR: Living Controls
+    # SIDEBAR: Living Memory
     with st.sidebar:
         st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
-        bid = st.number_input("Deduct Bid:", min_value=0.0, step=1.0)
-        if st.button("Update Cash"): 
-            st.session_state.faab -= bid
-            st.rerun()
+        spent = st.number_input("Log Spent Bid:", min_value=0.0, step=1.0)
+        if st.button("Update Budget"): st.session_state.faab -= spent
         
         st.divider()
         st.subheader("📢 Commit Transaction")
-        move = st.text_input("Log Trade/Claim:", placeholder="e.g. 'Bobbys Squad claimed Samuel Basallo'")
-        if st.button("Sync Brain"):
+        move = st.text_input("Trade/Claim:", placeholder="e.g. 'Seiya Later claimed Roki Sasaki'")
+        if st.button("Sync League Brain"):
             st.session_state.history.append(move)
             st.success("State Synced!")
 
-    # 4. TABBED INTERFACE
-    t1, t2, t3 = st.tabs(["🔥 Trade & FYPD Simulator", "📊 Roster Valuation", "🎯 FAAB & Scouting"])
+    # 4. MULTI-TAB STRATEGIC ARCHITECTURE
+    tabs = st.tabs(["🔥 Trade Simulator", "📋 Master Ledger", "🎯 Priority FAs", "🕵️‍♂️ Trade Targets", "😴 Sleepers"])
 
-    with t1:
-        st.subheader("OOTP-Style Trade & Draft Grading")
-        if prompt := st.chat_input("Grade a trade or pick..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            context = f"{SCORING_CONTEXT}\nROSTERS: {FULL_LEAGUE_DB}\nMOVES: {st.session_state.history}\nPROMPT: {prompt}"
-            
-            with st.spinner("Simulating Surplus Value..."):
-                response = model.generate_content(context)
-                st.markdown(response.text)
+    # Shared Logic for AI Reasoning Buttons
+    def get_ai_advice(query_type, user_prompt=""):
+        context = f"League Database: {FULL_LEAGUE_DB}\nScoring: {SCORING}\nStrategy: {STRATEGY}\nHistory: {st.session_state.history}\n"
+        full_query = f"{context}\nQuery Type: {query_type}\nUser Input: {user_prompt}"
+        return model.generate_content(full_query).text
 
-    with t2:
-        st.subheader("Numerical Player Ratings (0-100)")
-        st.info("Ratings are calculated on 2026 Current vs 2027-2028 Potential impact.")
-        st.table({"Manager": list(FULL_LEAGUE_DB.keys()), "Star Players": [", ".join(v['Infielders'][:2]) for v in FULL_LEAGUE_DB.values()]})
+    with tabs[0]:
+        st.subheader("OOTP-Style Trade Grading & Counter-Proposals")
+        trade_prompt = st.chat_input("Input a trade: e.g. 'Grade my Fried for their Baldwin and a 1st'")
+        if trade_prompt:
+            with st.spinner("Simulating surplus value outcomes..."):
+                st.markdown(get_ai_advice("Trade Analysis", trade_prompt))
 
-    with t3:
-        st.subheader("Living FAAB & Scout Recommendations")
-        st.write(f"**Current Strategy:** Hard Youth Pivot (2026-28 Window)")
-        st.caption("1. PRIORITY FREE AGENT: Samuel Basallo (C/1B) - 94 OOTP Potential")
-        st.caption("2. FYPD TARGET: Tatsuya Imai (RHP) - High-floor 2026 ZiPS impact")
-        st.caption("3. TRADE PROJECT: Target Bobby Witt Jr. SS surplus from Bobbys Squad")
+    with tabs[1]:
+        st.subheader("Global Roster Ledger")
+        team = st.selectbox("View Manager's Full Depth Chart:", list(FULL_LEAGUE_DB.keys()))
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Catchers:**", FULL_LEAGUE_DB[team]["Catchers"])
+            st.write("**Infielders:**", FULL_LEAGUE_DB[team]["Infielders"])
+        with col2:
+            st.write("**Outfielders:**", FULL_LEAGUE_DB[team]["Outfielders"])
+            st.write("**Pitchers:**", FULL_LEAGUE_DB[team]["Pitchers"])
+
+    with tabs[2]:
+        st.subheader("Real-Time Priority Free Agent Scouting")
+        if st.button("Scout New Free Agents"):
+            with st.spinner("Identifying high-floor ZiPS targets..."):
+                st.markdown(get_ai_advice("Priority Free Agents"))
+        fa_chat = st.text_input("Ask about a specific player position for FA:")
+        if fa_chat: st.markdown(get_ai_advice("FA Deep Dive", fa_chat))
+
+    with tabs[3]:
+        st.subheader("Proactive Trade Targets (Position Specific)")
+        if st.button("Generate Trade Projects"):
+            with st.spinner("Scanning league depth for positional surplus..."):
+                st.markdown(get_ai_advice("Trade Target Identification"))
+        target_chat = st.text_input("Ask: 'Who has extra 3B depth I can target?'")
+        if target_chat: st.markdown(get_ai_advice("Trade Target Search", target_chat))
+
+    with tabs[4]:
+        st.subheader("Sleeper Cell: Undervalued 2026-28 Assets")
+        if st.button("Find Undervalued Sleepers"):
+            with st.spinner("Scanning age-curves and under-the-radar stats..."):
+                st.markdown(get_ai_advice("Sleeper Identification"))
+        sleeper_chat = st.text_input("Ask: 'Find me a high-ceiling pitching sleeper...'")
+        if sleeper_chat: st.markdown(get_ai_advice("Sleeper Deep Dive", sleeper_chat))
 
 except Exception as e:
     st.error(f"Reasoning Engine Offline: {e}")
