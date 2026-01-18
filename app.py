@@ -273,6 +273,11 @@ try:
     sh = gc.open_by_key(SHEET_ID)
     history_ws, roster_ws = sh.get_worksheet(0), sh.get_worksheet(1)
     
+    # Force Reload Button in Sidebar
+    if st.sidebar.button("🔄 Force Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
     try:
         block_ws = sh.worksheet("Trade Block")
         block_data = block_ws.col_values(1)
@@ -360,11 +365,19 @@ try:
         if up_file and st.button("Analyze Image"):
             st.write(analyze_trade_block_image(up_file, json.dumps(user_roster)))
 
-    # TAB 4: LEDGER
+    # TAB 4: LEDGER (FIXED)
     with tabs[4]:
-        df = pd.DataFrame(raw_matrix)
-        st.dataframe(df, use_container_width=True)
-        st.download_button("📥 Excel", convert_df_to_excel(df), "Rosters.xlsx")
+        st.subheader("📊 Roster Matrix")
+        # Ensure raw_matrix has content before creating DataFrame
+        if raw_matrix and len(raw_matrix) > 0:
+            # FIX: Use first row as headers, rest as data
+            headers = raw_matrix[0]
+            data = raw_matrix[1:]
+            df = pd.DataFrame(data, columns=headers)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.download_button("📥 Export Excel", convert_df_to_excel(df), "Rosters.xlsx")
+        else:
+            st.warning("⚠️ No data found in the roster sheet.")
 
     # TAB 5: SCOUTING
     with tabs[5]:
