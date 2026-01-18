@@ -8,6 +8,7 @@ import requests
 import json
 import time
 import difflib
+import re  # CRITICAL: For extracting clean data from AI responses
 
 # --- 1. GLOBAL MASTER CONFIGURATION ---
 SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A"
@@ -19,7 +20,7 @@ TEAM_NAMES = [
 
 # --- 2. CORE UTILITY ENGINE ---
 def get_gspread_client():
-    """Secure connection to Google Sheets."""
+    """Secure connection to Google Sheets via Service Account."""
     info = dict(st.secrets["gcp_service_account"])
     key = info["private_key"].replace("\\n", "\n")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -32,6 +33,31 @@ def convert_df_to_excel(df):
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False)
     return output.getvalue()
+
+def clean_ai_matrix(raw_response):
+    """
+    Surgically extracts Python list from AI text to prevent 'Structure' errors.
+    Ensures every row has the same number of columns (Rectangularity).
+    """
+    try:
+        # 1. Regex to find the list bracket structure [[...]]
+        match = re.search(r"(\[[\s\n]*\[.*\][\s\n]*\])", raw_response, re.DOTALL)
+        if not match: return None
+        
+        # 2. Convert string to Python object
+        matrix = eval(match.group(1))
+        
+        # 3. Rectangularity Check (Pad short rows)
+        if isinstance(matrix, list) and len(matrix) > 0:
+            max_cols = max(len(row) for row in matrix)
+            for row in matrix:
+                while len(row) < max_cols:
+                    row.append("") # Pad with empty string
+            return matrix
+        return None
+    except Exception as e:
+        st.error(f"Matrix Cleaning Failed: {e}")
+        return None
 
 def parse_horizontal_rosters(matrix):
     """
@@ -86,30 +112,40 @@ def verify_trade_dialog(team_a, final_a, team_b, final_b, roster_ws, history_ws,
         
     st.divider()
     if st.button("🔥 Confirm & Push to Google Sheets", use_container_width=True):
-        with st.spinner("Executing Coordinate Swap..."):
+        with st.spinner("Executing Coordinate Swap & Rectangularizing Matrix..."):
             names_a = ", ".join([p['name'] for p in final_a])
             names_b = ", ".join([p['name'] for p in final_b])
             
             # Ironclad logic prompt for AI-assisted matrix restructuring
             model = get_active_model()
             logic_prompt = f"""
+            SYSTEM: You are a database administrator.
             MATRIX: {raw_matrix}
-            TASK: Swap {names_a} from {team_a}'s column to the bottom of {team_b}'s column. 
-            Swap {names_b} from {team_b}'s column to the bottom of {team_a}'s column.
-            Maintain horizontal structure. Return ONLY a Python list of lists.
+            TASK: 
+            1. Remove {names_a} from {team_a}'s column.
+            2. Add {names_a} to the first empty slot in {team_b}'s column.
+            3. Remove {names_b} from {team_b}'s column.
+            4. Add {names_b} to the first empty slot in {team_a}'s column.
+            5. Ensure all rows have equal length (pad with empty strings if needed).
+            OUTPUT: Return ONLY a raw Python list of lists.
             """
             res = model.generate_content(logic_prompt).text
-            clean_res = res.replace("```python", "").replace("```", "").strip()
-            try:
-                new_m = eval(clean_res)
-                roster_ws.clear()
-                roster_ws.update(new_m)
-                history_ws.append_row([f"TRADE: {team_a} ↔️ {team_b} | {names_a} for {names_b}"])
-                st.success("Ledger Synchronized!")
-                time.sleep(1)
-                st.rerun()
-            except:
-                st.error("Matrix Structure Error. Please verify the AI output format.")
+            
+            # Apply the Cleaning Layer
+            final_matrix = clean_ai_matrix(res)
+            
+            if final_matrix:
+                try:
+                    roster_ws.clear()
+                    roster_ws.update(final_matrix)
+                    history_ws.append_row([f"TRADE: {team_a} ↔️ {team_b} | {names_a} for {names_b}"])
+                    st.success("Ledger Synchronized!")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Google API Error: {e}")
+            else:
+                st.error("AI failed to generate a valid matrix structure.")
 
 # --- 4. THE AI BRAIN (SELF-HEALING & MULTI-AGENT) ---
 def get_active_model():
@@ -136,15 +172,18 @@ def call_openrouter(model_id, persona, prompt):
 
 def run_gm_analysis(query, league_data, task="Trade"):
     """
-    Hypothetical Trade Arbitrator:
-    Determines winners based on 2026 ZiPS, age, and scarcity.
-    Uses the Realism Gate to block 'Witt-for-Fried' level delusions.
+    The Multi-Agent Core.
+    1. Perplexity (Sonar) -> Live Web Data (ZiPS, News)
+    2. Gemini -> The Verdict (Realism Gate)
+    3. GPT-4o -> Market Value
+    4. Claude 3.5 -> Long-Term Strategy
     """
     mandate = """
     REALISM PROTOCOL: 
     - Elite cornerstone youth (Witt, Gunnar, Elly) > aging SPs (Fried).
     - If a trade is lopsided, call it 'UNREALISTIC' and explain why.
-    - Identify the winner and suggest necessary sweeteners.
+    - If the user's trade suggestion is bad, provide 3 ALTERNATIVE REALISTIC trades.
+    - Analyze ALL players in the trade simultaneously.
     """
     with st.spinner("📡 Scouting live 2026 ZiPS, FanGraphs, and Tiers..."):
         search = call_openrouter("perplexity/sonar", "Lead Sabermetrician.", f"Jan 2026 ZiPS and dynasty trade value for: {query}")
@@ -171,8 +210,18 @@ try:
     full_league_data = parse_horizontal_rosters(raw_matrix)
     model = get_active_model()
 
-    # B. THE 8-TAB COMMAND CENTER
-    tabs = st.tabs(["🔁 Terminal", "🔥 Analysis", "🔍 Finder", "📊 Ledger", "🕵️‍♂️ Scouting", "💎 Sleepers", "🎯 Priority", "📜 History"])
+    # B. THE 9-TAB COMMAND CENTER
+    tabs = st.tabs([
+        "🔁 Terminal", 
+        "🔥 Analysis", 
+        "🔍 Finder", 
+        "📊 Ledger", 
+        "🕵️‍♂️ Scouting", 
+        "💎 Sleepers", 
+        "🎯 Priority", 
+        "🎟️ Draft Picks", 
+        "📜 History"
+    ])
 
     # --- TAB 0: TERMINAL ---
     with tabs[0]:
@@ -211,6 +260,7 @@ try:
     # --- TAB 2: FINDER ---
     with tabs[2]:
         st.subheader("🔍 Automated Win-Win Partner Finder")
+        st.caption("If your offer is unrealistic, the AI will auto-generate better alternatives.")
         f_col1, f_col2 = st.columns(2)
         with f_col1:
             find_target = st.selectbox("I need:", ["Elite Prospects (<23)", "2026 Production", "Draft Capital"])
@@ -219,6 +269,8 @@ try:
         if st.button("Scour League", use_container_width=True):
             res = run_gm_analysis(f"Find trades to get {find_target} by giving up {find_offer}", json.dumps(full_league_data), "Finder")
             st.markdown(res["Gemini"])
+            with st.expander("See Second Opinions"):
+                st.write(res["Claude"])
 
     # --- TAB 3: LEDGER ---
     with tabs[3]:
@@ -234,13 +286,17 @@ try:
         if scout_p:
             scout_res = run_gm_analysis(f"Full scouting report for {scout_p}", json.dumps(full_league_data), "Scouting")
             st.write(scout_res["Gemini"])
+            c1, c2 = st.columns(2)
+            with c1: st.info("Market Value"); st.write(scout_res["GPT"])
+            with c2: st.info("Strategic Fit"); st.write(scout_res["Claude"])
 
     # --- TAB 5: SLEEPERS ---
     with tabs[5]:
         st.subheader("💎 2026 Market Inefficiencies")
         if st.button("Identify Undervalued Breakouts"):
-            sleeper_res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS currently undervalued in dynasty.", json.dumps(full_league_data), "Sleepers")
+            sleeper_res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(full_league_data), "Sleepers")
             st.write(sleeper_res["Gemini"])
+            st.write(sleeper_res["GPT"])
 
     # --- TAB 6: PRIORITY ---
     with tabs[6]:
@@ -249,11 +305,19 @@ try:
             priority_res = run_gm_analysis("Based on my retool strategy, who are the top 5 targets in the league I should move for now?", json.dumps(full_league_data), "Priority")
             st.write(priority_res["Gemini"])
 
-    # --- TAB 7: HISTORY ---
+    # --- TAB 7: DRAFT PICKS ---
     with tabs[7]:
+        st.subheader("🎟️ Draft Asset Tracker")
+        st.caption("Track 2026-2028 Capital")
+        # Placeholder for draft pick management
+        if st.button("Evaluate 2026 Class Strength"):
+             draft_res = run_gm_analysis("Analyze the 2026 MLB Draft Class strength for fantasy purposes.", "N/A", "Draft")
+             st.write(draft_res["Gemini"])
+
+    # --- TAB 8: HISTORY ---
+    with tabs[8]:
         st.subheader("📜 History Log")
         for log in history_ws.col_values(1)[::-1]: st.write(f"🔹 {log}")
 
 except Exception as e:
     st.error(f"Executive Protocol Failed: {e}")
-
