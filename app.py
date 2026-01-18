@@ -111,61 +111,75 @@ st.title("🧠 Dynasty Assistant: Permanent Living Ledger")
 
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 
+import pandas as pd
+
 try:
-    # 1. Connect to your Sheet
+    # 1. Connect to both tabs
     gc = get_gspread_client()
     sh = gc.open_by_key(SHEET_ID)
     
-    # --- MULTI-TAB SETUP ---
-    # Worksheet 0 (first tab) = Trade History
+    # History Tab (Text Log)
     history_ws = sh.get_worksheet(0)
+    # Rosters Tab (The actual Database)
+    roster_ws = sh.get_worksheet(1) 
+
+    # Fetch current state from Sheet
     permanent_history = history_ws.col_values(1)
     
-    # Worksheet 1 (second tab) = The actual Roster Database
-    # If you haven't made a second tab yet, this will trigger the error below
-    try:
-        roster_ws = sh.get_worksheet(1)
-        # This reads every row and column of your rosters
-        current_roster_data = roster_ws.get_all_values()
-    except:
-        current_roster_data = "Roster tab not found. Please add a second tab to your Google Sheet."
+    # Get current rosters as a list of lists (the "Live Ledger")
+    # This replaces the hardcoded dictionary in your script
+    raw_rosters = roster_ws.get_all_values()
+    df_rosters = pd.DataFrame(raw_rosters)
 
-    # 2. Configure Gemini API
+    # 2. Configure Gemini
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    flash_models = [m for m in available_models if 'flash' in m]
-    model_to_use = flash_models[0] if flash_models else available_models[0]
-    model = genai.GenerativeModel(model_to_use)
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
-    # --- SIDEBAR: DATABASE UPDATE ENGINE ---
+    # SIDEBAR: The Transaction Engine
     with st.sidebar:
-        st.header(f"💰 FAAB: ${st.session_state.faab:.2f}")
-        spent = st.number_input("Log Spent Bid:", min_value=0.0, step=1.0)
-        if st.button("Update Budget"): st.session_state.faab -= spent
-
-        st.divider()
-        st.subheader("📢 Log Transaction")
+        st.header("📢 Log Transaction")
         move = st.text_input("Trade/Claim:", placeholder="e.g. 'Fried for Skenes'")
         
-        if st.button("Update Database & Log"):
-            # A. Log the text to Tab 1 (History)
-            history_ws.append_row([move])
-            
-            # B. AI Roster Logic
-            with st.spinner("AI is rewriting the database..."):
+        if st.button("Update Live Database"):
+            with st.spinner("AI is re-calculating rosters..."):
+                # We feed the AI the CURRENT state from the spreadsheet
                 update_prompt = f"""
-                CURRENT_ROSTERS: {current_roster_data}
+                CURRENT_SPREADSHEET_DATA: {raw_rosters}
                 TRANSACTION: {move}
-                TASK: Act as a database administrator. Update the players' teams. 
-                Keep the team names as headers. Return the updated data as a clean 
-                comma-separated list for each row.
+                TASK: Act as a database admin. Move the players between teams 
+                based on the transaction. Keep the same column headers.
+                Return the updated data as a Python list of lists.
+                Format: [["Team A", "Team B"], ["Player 1", "Player 2"]]
+                Return ONLY the list.
                 """
-                new_data_raw = model.generate_content(update_prompt).text
+                response = model.generate_content(update_prompt)
                 
-                # C. Save the new list back to Tab 2 (Rosters)
-                # Note: This is where we will add the "write" command once your sheet is ready
-                st.success("History logged! To update rosters, ensure Tab 2 exists.")
-            st.rerun()
+                # Parse the AI response back into a Python list
+                try:
+                    new_roster_list = eval(response.text.strip())
+                    
+                    # 1. Update the Roster Sheet (OVERWRITE)
+                    roster_ws.clear()
+                    roster_ws.update(new_roster_list)
+                    
+                    # 2. Log the text to History
+                    history_ws.append_row([move])
+                    
+                    st.success("Rosters Updated in Google Sheets!")
+                    st.rerun()
+                except:
+                    st.error("AI returned invalid format. Try phrasing the trade more clearly.")
+
+    # TABS: The View
+    tabs = st.tabs(["🔥 Trade Analysis", "📋 Live Ledger"])
+
+    with tabs[1]:
+        st.subheader("Current Roster Database (Live from Sheet)")
+        # Show the actual data from the spreadsheet
+        st.dataframe(df_rosters, use_container_width=True)
+
+except Exception as e:
+    st.error(f"Reasoning Engine Offline: {e}")
 
     # APP TABS
     tabs = st.tabs(["🔥 Analysis & Scout", "📋 Master Ledger", "🕵️‍♂️ Permanent History", "😴 Sleepers", "💰 FAAB Strategy"])
