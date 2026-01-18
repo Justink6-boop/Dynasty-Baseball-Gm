@@ -36,7 +36,7 @@ def get_gspread_client():
 
 # --- 2. YOUR GOOGLE SHEET ID ---
 # Paste the ID from your URL: docs.google.com/spreadsheets/d/[THIS_PART]/edit
-SHEET_ID = "https://docs.google.com/spreadsheets/d/1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A/edit?usp=drivesdk" 
+SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A/edit?usp=drivesdk" 
 
 # --- 3. THE COMPLETE MASTER LEAGUE LEDGER (Rosters from PDF) ---
 def get_initial_league():
