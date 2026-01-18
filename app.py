@@ -395,19 +395,64 @@ try:
         if up_file and st.button("Analyze Image"):
             st.write(analyze_trade_block_image(up_file, json.dumps(user_roster)))
 
-    # TAB 4: LEDGER (FIXED)
+    # --- TAB 4: LEDGER (With Roster Organizer) ---
     with tabs[4]:
         st.subheader("📊 Roster Matrix")
-        # Ensure raw_matrix has content before creating DataFrame
+        
+        # --- NEW: ROSTER ORGANIZER UI ---
+        with st.expander("✨ Roster Architect (Sort by Position)", expanded=False):
+            st.caption("This will reorganize a team's column into HITTERS and PITCHERS sections.")
+            target_team_sort = st.selectbox("Select Team to Organize:", TEAM_NAMES, key="sort_team_sel")
+            
+            if st.button(f"Organize {target_team_sort} by Position"):
+                with st.spinner(f"AI is sorting {target_team_sort}'s roster..."):
+                    # 1. Get current players
+                    current_roster = [p['name'] for p in full_league_data[target_team_sort]]
+                    
+                    # 2. Send to AI for sorting
+                    sorted_list = organize_roster_ai(current_roster)
+                    
+                    if sorted_list:
+                        # 3. Reconstruct the Matrix Column
+                        # Find the column index
+                        headers = [str(c).strip() for c in raw_matrix[0]]
+                        try:
+                            col_idx = headers.index(target_team_sort)
+                            
+                            # Clear the old column data (keep header)
+                            for r in range(1, len(raw_matrix)):
+                                if col_idx < len(raw_matrix[r]):
+                                    raw_matrix[r][col_idx] = ""
+                            
+                            # Write the new sorted list
+                            # Extend matrix if sorted list is longer than current sheet
+                            while len(raw_matrix) < len(sorted_list) + 1:
+                                raw_matrix.append([""] * len(raw_matrix[0]))
+                                
+                            for i, item in enumerate(sorted_list):
+                                raw_matrix[i+1][col_idx] = item
+                                
+                            # Update Google Sheet
+                            roster_ws.clear()
+                            roster_ws.update(raw_matrix)
+                            st.success(f"✅ {target_team_sort} has been organized!")
+                            time.sleep(1)
+                            st.rerun()
+                            
+                        except ValueError:
+                            st.error("Team column not found.")
+                    else:
+                        st.error("AI failed to sort the roster.")
+
+        # --- EXISTING DISPLAY LOGIC ---
         if raw_matrix and len(raw_matrix) > 0:
-            # FIX: Use first row as headers, rest as data
             headers = raw_matrix[0]
             data = raw_matrix[1:]
             df = pd.DataFrame(data, columns=headers)
             st.dataframe(df, use_container_width=True, hide_index=True)
             st.download_button("📥 Export Excel", convert_df_to_excel(df), "Rosters.xlsx")
         else:
-            st.warning("⚠️ No data found in the roster sheet.")
+            st.warning("⚠️ No data found. (Check Sheet Index in Code)")
 
     # TAB 5: SCOUTING
     with tabs[5]:
