@@ -1,8 +1,9 @@
 import streamlit as st
 import google.generativeai as genai
+from streamlit_gsheets import GSheetsConnection
 
-# --- 1. THE COMPLETE MASTER LEAGUE LEDGER (From Your Document) ---
-# This initial state is only used once to set up the session
+# --- 1. THE COMPLETE MASTER LEAGUE LEDGER (All 10 Teams) ---
+# [cite_start]Pre-loaded with every player from your document [cite: 1-17]
 def get_initial_league():
     return {
         "Witness Protection (Me)": {
@@ -25,23 +26,71 @@ def get_initial_league():
             "Outfielders": ["Corbin Carroll", "Pete Crow-Armstrong", "Aaron Judge", "Fernando Tatis Jr.", "Kyle Tucker", "Michael Harris II", "Cam Smith", "Anthony Santander (UT)", "Ryan Clifford (1B/OF)", "Cole Carrigg", "James Tibbs"],
             "Pitchers": ["Hunter Brown", "Zac Gallen", "Kevin Gausman", "Shota Imanaga", "George Kirby", "Kodai Senga", "Framber Valdez", "Adrian Morejon", "Andres Munoz", "Sandy Alcantara", "Spencer Arrighetti", "Shane Bieber", "Luis Castillo", "Mitch Keller", "Hurston Waldrep", "Bryan Woo", "Emmanuel Clase", "Ryan Helsley", "Jeff Hoffman", "Grant Taylor", "Pablo Lopez", "Cole Ragans", "Felix Bautista", "Josh Hader", "Cam Caminiti", "Moises Chace", "Jackson Ferris", "Tekoah Roby", "Ricky Tiedemann", "Thomas White"],
             "Draft Picks": ["2026 Pick 2.01"]
+        },
+        "Guti Gang": {
+            "Catchers": ["Cal Raleigh", "Kyle Teel", "Blake Mitchell", "Jeferson Quero"],
+            "Infielders": ["Lenyn Sosa (1B, 2B)", "Ketel Marte (2B)", "Jazz Chisholm Jr. (2B, 3B)", "Francisco Lindor (SS)", "Vinnie Pasquantino (1B)", "Mookie Betts (SS)", "Zach Neto (SS)", "Willi Castro (2B, 3B, OF)", "Anthony Volpe (SS)", "Jacob Gonzalez (2B, SS)", "George Lombard Jr. (SS)", "Jesus Made (SS)", "Orelvis Martinez (SS)", "Jared Serna (2B, SS)", "Jett Williams (2B, SS, OF)"],
+            "Outfielders": ["Cody Bellinger", "Lawrence Butler", "Brandon Nimmo", "James Wood", "Mike Trout (UT)", "Kevin Alcantara", "Adolis Garcia", "Austin Hays", "Chandler Simpson", "Trevor Larnach (UT)", "Xavier Isaac (UT)", "Braden Montgomery"],
+            "Pitchers": ["David Peterson", "Carlos Rodon", "Huascar Brazoban", "Jack Dreyer", "Reed Garrett", "Tyler Rogers", "Gabe Speier", "Robert Suarez", "Luke Weaver", "Logan Allen", "Nathan Eovaldi", "Luis Gil", "MacKenzie Gore", "Tylor Megill", "Bryce Miller", "Max Scherzer", "Carson Whisenhunt", "Jaden Hill", "Yariel Rodriguez", "Gerrit Cole", "Zach Eflin", "Rhett Lowder", "Tyler Mahle", "Justin Steele", "Emiliano Teodo"]
+        },
+        "Happy": {
+            "Catchers": ["Hunter Goodman", "Francisco Alvarez", "Ethan Salas"],
+            "Infielders": ["Nick Kurtz (1B)", "Jackson Holliday (2B)", "Nathaniel Lowe (1B)", "Corey Seager (SS)", "Willson Contreras (1B)", "Freddie Freeman (1B)", "Nico Hoerner (2B)", "Hyeseong Kim (2B)", "Brice Turang (2B)", "Jose Ramirez (3B)", "Carlos Correa (3B, SS)", "Marcelo Mayer (3B)", "Moises Ballesteros (UT)", "Travis Bazzana (2B)", "Kristian Campbell (2B)", "Josh Jung (3B)", "Franklin Arias (SS)", "Alex Freeland (3B)"],
+            "Outfielders": ["Roman Anthony", "Wyatt Langford", "Juan Soto", "Julio Rodriguez", "Jordan Beck", "Owen Caissie", "Evan Carter", "Jackson Chourio", "Brenton Doyle", "Jhostynxon Garcia", "Jackson Merrill", "Enrique Bradfield Jr.", "C.J. Kayfus", "Yohendrick Pinango", "Nelson Rada"],
+            "Pitchers": ["Shane Baz", "Brayan Bello", "Tanner Bibee", "Garrett Crochet", "Lucas Giolito", "Clay Holmes", "Jack Leiter", "Garrett Whitlock", "Kyle Bradish", "Luis Garcia", "Sonny Gray", "Cristian Javier", "Michael King", "Quinn Priester", "Drew Rasmussen", "Paul Skenes", "Jhoan Duran", "Reese Olson", "Spencer Schwellenbach", "Jurrangelo Cijntje", "Kumar Rocker", "Jonah Tong", "Payton Tolle"]
+        },
+        "Hit it Hard Hit it Far": {
+            "Catchers": ["Shea Langeliers", "Logan O'Hoppe", "Jonah Heim", "Keibert Ruiz"],
+            "Infielders": ["Alec Burleson (1B, OF)", "Jorge Polanco (2B)", "Manny Machado (3B)", "Dansby Swanson (SS)", "Eugenio Suarez (3B)", "Luke Keaschall (2B)", "Ozzie Albies (2B)", "Triston Casas (1B)", "Ryan O'Hearn (1B, OF)", "Pavin Smith (1B)", "Alec Bohm (3B)", "Oswaldo Cabrera (3B)", "Xander Bogaerts (SS)", "Colson Montgomery (SS)", "Carson Williams (SS)", "Charlie Condon (1B)", "Termarr Johnson (2B)"],
+            "Outfielders": ["Teoscar Hernandez", "Steven Kwan", "Jung Hoo Lee", "Lars Nootbaar", "Justin Crawford", "Victor Scott", "Masataka Yoshida (UT)", "Walker Jenkins"],
+            "Pitchers": ["Matthew Boyd", "Noah Cameron", "Sean Manaea", "Luis Severino", "Brady Singer", "Michael Wacha", "Brandon Woodruff", "Jose Alvarado", "Aaron Civale", "Connelly Early", "Kyle Harrison", "Logan Henderson", "Jake Irvin", "Miles Mikolas", "Charlie Morton", "Roki Sasaki", "Jameson Taillon", "Hagen Smith"]
+        },
+        "ManBearPuig": {
+            "Catchers": ["Samuel Basallo", "William Contreras", "Jimmy Crooks", "Josue Briceno (1B)", "Eduardo Tait"],
+            "Infielders": ["Vladimir Guerrero Jr. (1B)", "Sal Stewart (1B)", "Junior Caminero (3B)", "Elly De La Cruz (SS)", "Matt Olson (1B)", "CJ Abrams (SS)", "Coby Mayo (1B)", "Spencer Steer (1B)", "Bryson Stott (2B)", "Cole Young (2B)", "Addison Barger (3B, OF)", "Brady House (3B)", "Mark Vientos (3B)", "Jonathan Aranda (1B)", "Jordan Westburg (3B)", "Michael Arroyo (2B)", "Deyvison De Los Santos (3B)", "Aidan Miller (SS)"],
+            "Outfielders": ["Oneil Cruz", "Jarren Duran", "Heliot Ramos", "Daulton Varsho", "Yordan Alvarez (UT)", "Kyle Schwarber (UT)", "Adrian Del Castillo (UT)", "Jeremiah Jackson", "Jakob Marsee", "Max Clark", "Josue De Paula", "Chase DeLauter", "Lazaro Montes", "Emmanuel Rodriguez"],
+            "Pitchers": ["Bryan Abreu", "Matt Brash", "Edwin Diaz", "Hunter Gaddis", "Brad Keller", "JoJo Romero", "Cade Smith", "Devin Williams", "Bubba Chandler", "Tyler Glasnow", "Hunter Greene", "Nick Lodolo", "Luis Morales", "Blake Snell", "Nolan McLean (P)", "Jared Jones", "Jason Adam", "Mick Abel", "Gage Jump", "Andrew Painter", "Noah Schultz", "Charlee Soto", "Jarlin Susana", "Travis Sykora", "Hunter Barco"]
+        },
+        "Milwaukee Beers": {
+            "Catchers": ["Yainer Diaz", "Carlos Narvaez", "Harry Ford", "Alejandro Kirk", "Gabriel Moreno"],
+            "Infielders": ["Bryce Harper (1B)", "Jose Altuve (2B, OF)", "Matt Chapman (3B)", "Geraldo Perdomo (SS)", "Andrew Vaughn (1B)", "Ezequiel Tovar (SS)", "Nolan Schanuel (1B)", "Brendan Donovan (2B)", "Luis Garcia Jr. (2B)", "Matt McLain (2B)", "Christian Moore (2B)", "Isaac Paredes (3B)", "Austin Riley (3B)", "Jesus Baez (3B, SS)", "Felnin Celesten (SS)", "Leodalis De Vries (SS)", "Colt Emerson (SS)", "Sebastian Walcott (SS)", "JJ Wetherholt (2B, SS)"],
+            "Outfielders": ["Colton Cowser", "Tyler Freeman", "Riley Greene", "Andy Pages", "Bryan Reynolds", "Shohei Ohtani (UT)", "Bryce Eldridge (UT)", "TJ Friedl", "Carson Benge", "Joey Loperfido", "Jacob Melton", "Aidan Smith", "Ryan Waldschmidt"],
+            "Pitchers": ["Andrew Abbott", "Seth Lugo", "Zebby Matthews", "Casey Mize", "Trevor Rogers", "Brandon Sproat", "Logan Webb", "Orion Kerkering", "Emilio Pagan", "Jose Berrios", "Zack Littell", "Parker Messick", "Joe Ryan", "Brad Lord", "Corbin Burnes", "Zack Wheeler", "Ryan Sloan", "Robby Snelling", "Santiago Suarez", "Miguel Ullola"]
+        },
+        "Seiya Later": {
+            "Catchers": ["Carson Kelly", "Agustin Ramirez", "Kyle Valera (UT)"],
+            "Infielders": ["Rafael Devers (1B)", "Gleyber Torres (2B)", "Alex Bregman (3B)", "Trevor Story (SS)", "Matt Shaw (3B)", "Bo Bichette (SS)", "Warming Bernabel (1B)", "Willy Adames (SS)", "Christian Encarnacion-Strand (1B)", "Victor Figueroa (1B)", "Luis Pena (2B, SS)", "Bryce Rainer (SS)"],
+            "Outfielders": ["Jo Adell", "Ramon Laureano", "Jurickson Profar", "George Springer", "Giancarlo Stanton (UT)", "Christian Yelich (UT)", "Trent Grisham", "Mickey Moniak", "Seiya Suzuki (UT)", "Joshua Baez", "Edward Florentino", "Mike Sirota", "Zac Veen"],
+            "Pitchers": ["Javier Assad", "Gavin Williams", "Yoshinobu Yamamoto", "David Bednar", "Raisel Iglesias", "Griffin Jax", "Mason Miller", "Abner Uribe", "Taj Bradley", "Caden Dana", "Jacob deGrom", "Cade Horton", "Matthew Liberatore", "Jacob Misiorowski", "Robbie Ray", "Chris Sale", "Tarik Skubal", "Jackson Jobe", "Max Meyer", "Grayson Rodriguez", "Ben Joyce", "Daniel Palencia", "Brandon Clarke", "Daniel Espino", "Michael Forret", "Ty Johnson", "Wei-En Lin", "Quinn Mathews", "Noble Meyer", "Jaxon Wiggins"]
+        },
+        "Special Eds": {
+            "Catchers": ["Patrick Bailey", "Austin Wells", "Bo Naylor"],
+            "Infielders": ["Christian Walker (1B)", "Brandon Lowe (2B)", "Ryan McMahon (3B)", "Jeremy Pena (SS)", "Max Muncy (3B)", "Masyn Winn (SS)", "Luis Arraez (1B)", "Rhys Hoskins (1B)", "Thairo Estrada (2B)", "Luis Rengifo (2B, 3B)", "Amed Rosario (3B)", "Jose Caballero (2B, 3B, SS, OF)"],
+            "Outfielders": ["Wilyer Abreu", "Randy Arozarena", "Sal Frelick", "Lourdes Gurriel Jr.", "Taylor Ward", "Josh Lowe", "Jose Siri"],
+            "Pitchers": ["Erick Fedde", "Yusei Kikuchi", "Jesus Luzardo", "Bailey Ober", "Ryan Pepiot", "Freddy Peralta", "Nick Pivetta", "J.P. Sears", "Tomoyuki Sugano", "Griffin Canning", "Nestor Cortes Jr.", "Clarke Schmidt", "Taijuan Walker", "Simeon Woods-Richardson", "Ryan Pressly", "Alex Cobb", "Josiah Gray", "Shane McClanahan", "John Means", "Dane Dunning", "Martin Perez"]
         }
-        # ... Remaining 7 teams (Guti Gang, Happy, ManBearPuig, Beers, Seiya, Hit it Hard, Special Eds) follow this format
     }
 
-# --- 2. PERMANENT MEMORY INITIALIZATION ---
+# --- 2. PERMANENT CONNECTION & STATE ---
+# Replace with your actual Google Sheet URL
+SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE"
+
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 if "master_ledger" not in st.session_state: st.session_state.master_ledger = get_initial_league()
-if "history" not in st.session_state: st.session_state.history = []
 
 # --- 3. CONNECTION & LIVE STATE ENGINE ---
 try:
+    # Set up Permanent Cloud Storage
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    df = conn.read(spreadsheet=SHEET_URL, ttl=0)
+    permanent_history = df.values.tolist() if not df.empty else []
+
+    # Configure AI
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    model = genai.GenerativeModel(available[0] if available else 'gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.0-flash')
     
     st.set_page_config(page_title="Executive Assistant GM", layout="wide")
-    st.title("🧠 Dynasty Assistant: Full-Cycle GM Engine")
+    st.title("🧠 Dynasty Assistant: Permanent Living Ledger")
 
     # SIDEBAR: Living Controls & Transaction Commit
     with st.sidebar:
@@ -51,18 +100,20 @@ try:
 
         st.divider()
         st.subheader("📢 Log Transaction")
-        move_desc = st.text_input("Trade/Claim:", placeholder="e.g. 'Witness Protection traded Max Fried to Happy for Paul Skenes'")
-        if st.button("Sync League Brain"):
-            # This logs the move for AI context
-            st.session_state.history.append(move_desc)
-            st.success("State Synced! AI now knows Fried is on Happy and Skenes is on Witness Protection.")
+        move_desc = st.text_input("Trade/Claim:", placeholder="e.g. 'Witness Protection traded Fried for Skenes'")
+        if st.button("Commit to Cloud"):
+            # Appends move to Google Sheets FOREVER
+            conn.create(spreadsheet=SHEET_URL, data=[[move_desc]])
+            st.success("Synced to Google Sheets!")
+            st.rerun()
 
-    # 4. TABBED INTERFACE
-    tabs = st.tabs(["🔥 Trade & Scout", "📋 Master Ledger", "🕵️‍♂️ Priority FAs", "😴 Sleepers", "💰 FAAB Strategy"])
+    # 4. MULTI-TAB STRATEGIC ARCHITECTURE
+    tabs = st.tabs(["🔥 Analysis & Scout", "📋 Master Ledger", "🕵️‍♂️ Priority FAs", "😴 Sleepers", "💰 FAAB Strategy"])
 
     # Shared Logic for AI Reasoning Hubs
     def get_ai_advice(query_type, user_prompt=""):
-        context = f"ROSTERS: {st.session_state.master_ledger}\nSCORING: 6x6 (OPS, QS, SVH)\nWINDOW: 2026-28\nMOVES: {st.session_state.history}\n"
+        # AI reads the PERMANENT history from Google Sheets before answering
+        context = f"ROSTERS: {st.session_state.master_ledger}\nSCORING: 6x6 (OPS, QS, SVH)\nWINDOW: 2026-28\nPERMANENT HISTORY: {permanent_history}\n"
         full_query = f"{context}\nQuery: {query_type}\nUser Input: {user_prompt}"
         return model.generate_content(full_query).text
 
@@ -70,26 +121,36 @@ try:
         st.subheader("OOTP Trade Simulator & Suggestions")
         trade_prompt = st.chat_input("Grade a trade or ask for suggestions...")
         if trade_prompt:
-            st.markdown(get_ai_advice("Trade Analysis", trade_prompt))
+            with st.spinner("Calculating Surplus Value..."):
+                st.markdown(get_ai_advice("Trade Analysis", trade_prompt))
 
     with tabs[1]:
         st.subheader("Live Global Ledger")
+        st.info("Rosters reflect the initial draft. Use 'Analysis' to see how recent trades impact these rosters.")
         team = st.selectbox("Select Team to Inspect:", list(st.session_state.master_ledger.keys()))
         col1, col2 = st.columns(2)
+        team_data = st.session_state.master_ledger[team]
         with col1:
-            st.write("**Catchers:**", st.session_state.master_ledger[team].get("Catchers", []))
-            st.write("**Infielders:**", st.session_state.master_ledger[team].get("Infielders", []))
+            st.write("**Catchers:**", team_data.get("Catchers", []))
+            st.write("**Infielders:**", team_data.get("Infielders", []))
         with col2:
-            st.write("**Outfielders:**", st.session_state.master_ledger[team].get("Outfielders", []))
-            st.write("**Pitchers:**", st.session_state.master_ledger[team].get("Pitchers", []))
-            st.write("**Picks:**", st.session_state.master_ledger[team].get("Draft Picks", []))
+            st.write("**Outfielders:**", team_data.get("Outfielders", []))
+            st.write("**Pitchers:**", team_data.get("Pitchers", []))
+            st.write("**Picks:**", team_data.get("Draft Picks", []))
 
     with tabs[2]:
         st.subheader("Real-Time Priority Free Agent Scouting")
         if st.button("Brainstorm Priority FAs"):
-            st.markdown(get_ai_advice("Scout Free Agents"))
+            with st.spinner("Identifying high-floor ZiPS targets..."):
+                st.markdown(get_ai_advice("Scout Free Agents"))
         fa_chat = st.text_input("Search position-specific FAs:")
         if fa_chat: st.markdown(get_ai_advice("FA Deep Dive", fa_chat))
 
+    with tabs[3]:
+        st.subheader("Sleepers & Undervalued Assets")
+        if st.button("Scan for Sleepers"):
+            with st.spinner("Analyzing exit velo and prospect age-curves..."):
+                st.markdown(get_ai_advice("Sleeper Identification"))
+
 except Exception as e:
-    st.error(f"Reasoning Engine Offline: {e}")
+    st.error(f"Setup Error: {e}")
