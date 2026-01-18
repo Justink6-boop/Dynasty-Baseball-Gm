@@ -241,8 +241,14 @@ def analyze_trade_block_text(block_text, user_roster):
 def analyze_trade_block_image(image_file, user_roster):
     model = get_active_model()
     img = Image.open(image_file)
-    prompt = f"Extract names. Compare to MY ROSTER: {user_roster}. Grade fit (A-F)."
-    with st.spinner("👀 Scanning Block..."):
+    prompt = f"""
+    Look at this Trade Block screenshot.
+    CRITICAL: Expand any abbreviated names (e.g. 'Z. Neto' -> 'Zach Neto').
+    
+    Compare the FULL names to MY ROSTER: {user_roster}.
+    Grade fit (A-F).
+    """
+    with st.spinner("👀 Expanding Names & Scanning Block..."):
         return model.generate_content([prompt, img]).text
 
 def get_fuzzy_matches(input_names, team_players):
