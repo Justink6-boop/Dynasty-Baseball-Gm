@@ -115,7 +115,9 @@ try:
             # UPDATED PAID MODEL PATHS
             opinions['ChatGPT'] = call_or("openai/gpt-4o", "You are an aggressive GM focused on pure market value.")
             opinions['Claude'] = call_or("anthropic/claude-3.5-sonnet", "You are a conservative strategist focused on long-term risk.")
-            opinions['Perplexity'] = call_or("perplexity/sonar-reasoning", "You are a data researcher focused on Statcast trends.")
+            # Updated Perplexity ID (Current 2026 Stable Version)
+opinions['Perplexity'] = call_or("perplexity/sonar", "You are a data researcher focused on Statcast trends and news.")
+
         
         return opinions
 
