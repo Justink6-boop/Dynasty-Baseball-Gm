@@ -37,19 +37,37 @@ def convert_df_to_excel(df):
         df.to_excel(writer, index=False)
     return output.getvalue()
 
-def clean_ai_matrix(raw_response):
-    """Parses AI matrix response to ensure rectangularity."""
-    try:
-        match = re.search(r"(\[[\s\n]*\[.*\][\s\n]*\])", raw_response, re.DOTALL)
-        if not match: return None
-        matrix = eval(match.group(1))
-        if isinstance(matrix, list) and len(matrix) > 0:
-            max_cols = max(len(row) for row in matrix)
-            for row in matrix:
-                while len(row) < max_cols: row.append("")
-            return matrix
-        return None
-    except: return None
+def flatten_roster_to_df(league_data):
+    """
+    TRANSFORMER: Converts the horizontal 'Team Columns' format into a 
+    vertical, sortable DataFrame: [Team, Player, Position, Category].
+    """
+    flat_data = []
+    
+    for team, players in league_data.items():
+        # Heuristic to detect category (Hitters vs Pitchers)
+        # We assume the list is sorted by the AI Organizer (Hitters first, then Pitchers)
+        current_cat = "Unknown"
+        for p in players:
+            name = p['name']
+            
+            # Detect Headers inserted by Roster Architect
+            if "HITTERS:" in name:
+                current_cat = "Hitter"
+                continue
+            elif "PITCHERS:" in name:
+                current_cat = "Pitcher"
+                continue
+            
+            # Simple heuristic for position if not explicitly stored
+            # (In a real DB, we'd store pos, but here we infer or leave blank for sorting)
+            flat_data.append({
+                "Team": team,
+                "Player": name,
+                "Category": current_cat
+            })
+            
+    return pd.DataFrame(flat_data)
 
 # --- 3. AI ENGINES (GEN & VISION) ---
 def get_active_model():
@@ -170,7 +188,7 @@ def execute_hard_swap(matrix, team_a, players_a, team_b, players_b):
         col_a_idx = headers.index(match_a)
         match_b = difflib.get_close_matches(team_b, headers, n=1, cutoff=0.8)[0]
         col_b_idx = headers.index(match_b)
-    except: return None, "Column not found."
+    except IndexError: return None, f"Column not found."
 
     def get_col_data(col_idx): return [row[col_idx] if col_idx < len(row) else "" for row in matrix]
     col_a_data = get_col_data(col_a_idx); col_b_data = get_col_data(col_b_idx)
@@ -243,12 +261,17 @@ def get_fuzzy_matches(input_names, team_players):
         else: results.append({"name": f"❌ '{name}' Not Found", "row": -1})
     return results
 
-# --- 5. IMPACT ANALYTICS & SAVE ENGINE ---
-def run_gm_analysis(query, league_data, task="Trade"):
+# --- 5. IMPACT ANALYTICS & INTEL ENGINE ---
+def run_gm_analysis(query, league_data, intel_data, task="Trade"):
     mandate = "REALISM GATE: Elite Youth > Aging Vets. Scout ALL 4 Ais."
+    
+    # Prepend INTEL to the context
+    intel_context = f"LEAGUE INTEL/RUMORS: {intel_data}" if intel_data else "NO LEAGUE INTEL AVAILABLE."
+    
     with st.spinner(f"📡 War Room: {task} Protocol..."):
         search = call_openrouter("perplexity/sonar", "Lead Sabermetrician.", f"Jan 2026 ZiPS and values for: {query}")
-    brief = f"ROSTERS: {league_data}\nINTEL: {search}\nQUERY: {query}\nMANDATE: {mandate}"
+        
+    brief = f"ROSTERS: {league_data}\n{intel_context}\nINTEL: {search}\nQUERY: {query}\nMANDATE: {mandate}"
     return {
         "Research": search,
         "Gemini": get_active_model().generate_content(f"Lead GM Verdict. {brief}").text,
@@ -256,73 +279,51 @@ def run_gm_analysis(query, league_data, task="Trade"):
         "Claude": call_openrouter("anthropic/claude-3.5-sonnet", "Strategist.", brief)
     }
 
-def analyze_and_save_block(image_files, user_roster, sh):
-    """
-    1. Extracts players.
-    2. Calculates SCORING IMPACT (Pct Increase).
-    3. Calculates OUTLOOK SHIFT (Rebuilder -> Contender).
-    4. Saves to 'Trade Block' Google Sheet.
-    """
+def analyze_and_save_block(image_files, user_roster, intel_data, sh):
+    """Extracts, Grades, and Saves to Trade Block with Intel Awareness."""
     model = get_active_model()
     prompt = f"""
     You are an Expert Dynasty GM. 
-    MY ROSTER (Analyze Deeply): {user_roster}
+    MY ROSTER: {user_roster}
+    LEAGUE RUMORS (INTEL): {intel_data}
     MY GOAL: Win in 2027 (Retooling).
-    SCORING SYSTEM: Standard Fantasy Points (H2H).
     
     TASK:
-    1. Extract ALL players from the images. Expand abbreviations.
-    2. For EACH player, perform a "Gap Analysis" against my current roster:
-       - 'Impact_Pct': Estimate the % increase in my weekly team scoring if I swap my current starter for this player. (e.g. "+5.2%")
-       - 'Outlook_Shift': How does this specific player change my team's trajectory? (e.g. "Fringe -> Contender" or "No Change").
+    1. Extract ALL players. Expand abbreviations.
+    2. "Gap Analysis":
+       - 'Impact_Pct': % scoring increase.
+       - 'Outlook_Shift': Trajectory change.
        - 'Verdict': PURSUE or PASS.
-       - 'Analysis': Brief reasoning citing ZiPS/Dynasty Rank.
+       - 'Analysis': Reasoning.
     
-    OUTPUT FORMAT:
-    Return ONLY a JSON list of dictionaries.
-    Example:
-    [
-      {{"Team": "Guti Gang", "Player": "Zach Neto", "Position": "SS", "Grade": "A", "Verdict": "PURSUE", "Impact_Pct": "+4.1%", "Outlook_Shift": "Accelerator", "Analysis": "Upgrade over current SS."}},
-      ...
-    ]
+    OUTPUT: JSON list of dicts.
     """
     
     content = [prompt]
     for img_file in image_files: content.append(Image.open(img_file))
         
-    with st.spinner(f"👀 Calculating Scoring Projections & Saving..."):
+    with st.spinner(f"👀 Calculating Analytics..."):
         try:
             response = model.generate_content(content).text
             clean_json = response.replace("```json", "").replace("```", "").strip()
             match = re.search(r"(\[.*\])", clean_json, re.DOTALL)
             if match:
                 data = json.loads(match.group(1))
-                try:
-                    block_ws = sh.worksheet("Trade Block")
-                except:
-                    block_ws = sh.add_worksheet("Trade Block", 1000, 10)
-                    # HEADER ROW with New Analytics Columns
-                    block_ws.append_row(["Team", "Player", "Position", "Grade", "Verdict", "Impact %", "Outlook Shift", "Analysis", "Timestamp"])
+                try: block_ws = sh.worksheet("Trade Block")
+                except: block_ws = sh.add_worksheet("Trade Block", 1000, 10); block_ws.append_row(["Team", "Player", "Position", "Grade", "Verdict", "Impact %", "Outlook Shift", "Analysis", "Timestamp"])
                 
                 timestamp = time.strftime("%Y-%m-%d %H:%M")
-                rows_to_add = []
+                rows = []
                 for entry in data:
-                    rows_to_add.append([
-                        entry.get("Team", "Unknown"),
-                        entry.get("Player", "Unknown"),
-                        entry.get("Position", "?"),
-                        entry.get("Grade", "N/A"),
-                        entry.get("Verdict", "N/A"),
-                        entry.get("Impact_Pct", "0%"),      # NEW
-                        entry.get("Outlook_Shift", "-"),    # NEW
-                        entry.get("Analysis", ""),
-                        timestamp
+                    rows.append([
+                        entry.get("Team", "Unknown"), entry.get("Player", "Unknown"), entry.get("Position", "?"),
+                        entry.get("Grade", "N/A"), entry.get("Verdict", "N/A"), entry.get("Impact_Pct", "0%"),
+                        entry.get("Outlook_Shift", "-"), entry.get("Analysis", ""), timestamp
                     ])
-                block_ws.append_rows(rows_to_add)
+                block_ws.append_rows(rows)
                 return data 
             else: return None
-        except Exception as e:
-            st.error(f"Analysis Failed: {e}"); return None
+        except Exception as e: st.error(f"Analysis Failed: {e}"); return None
 
 # --- 6. UI DIALOGS ---
 @st.dialog("Verify Roster Sync")
@@ -366,23 +367,26 @@ try:
     history_ws = sh.get_worksheet(0) 
     roster_ws = sh.get_worksheet(1) 
     
+    # INTEL SHEET CONNECTION
+    try:
+        intel_ws = sh.worksheet("Intel")
+        intel_data_raw = intel_ws.get_all_values()
+        # Convert to a text blob for the AI
+        intel_text = "\n".join([f"- {row[0]}: {row[1]}" for row in intel_data_raw[1:] if len(row) > 1])
+    except:
+        intel_text = ""
+        intel_ws = None
+
     if st.sidebar.button("🔄 Force Refresh"): st.cache_data.clear(); st.rerun()
     st.sidebar.divider()
-    st.sidebar.header("🛠️ Roster Inspector")
-    debug_team = st.sidebar.selectbox("Inspect Team:", ["Select..."] + TEAM_NAMES)
     
     raw_matrix = roster_ws.get_all_values()
     full_league_data = parse_horizontal_rosters(raw_matrix)
     user_roster = full_league_data.get(USER_TEAM, [])
-    
-    if debug_team != "Select...":
-        r = full_league_data.get(debug_team, [])
-        st.sidebar.write(f"Found {len(r)} players.")
-        st.sidebar.code("\n".join(sorted([p['name'] for p in r])))
 
-    tabs = st.tabs(["🔁 Terminal", "🔥 Analysis", "🔍 Finder", "📋 Block Monitor", "📊 Ledger", "🕵️‍♂️ Scouting", "💎 Sleepers", "🎯 Priority", "🎟️ Picks", "📜 History"])
+    tabs = st.tabs(["🔁 Terminal", "🔥 Analysis", "🔍 Finder", "🕵️ Intel", "📋 Block Monitor", "📊 Ledger", "🕵️‍♂️ Scouting", "💎 Sleepers", "🎯 Priority", "🎟️ Picks", "📜 History"])
 
-    with tabs[0]:
+    with tabs[0]: # TERMINAL
         st.subheader("Official Sync Terminal")
         tab_man, tab_vis = st.tabs(["🖐️ Manual Entry", "📸 Screenshot Upload"])
         with tab_man:
@@ -426,31 +430,52 @@ try:
                         if any(x.get('row') == -1 for x in ma + mb if x): st.error("Match failed.")
                         else: verify_trade_dialog(v_ta, ma, v_tb, mb, roster_ws, history_ws, raw_matrix, sh)
 
-    with tabs[1]:
+    with tabs[1]: # ANALYSIS
+        st.caption(f"🧠 AI is aware of {len(intel_text.splitlines())} Intel reports.")
         q = st.chat_input("Analyze trade...")
         if q:
-            res = run_gm_analysis(q, json.dumps(full_league_data))
+            res = run_gm_analysis(q, json.dumps(full_league_data), intel_text)
             st.write(res["Research"])
             c1, c2 = st.columns(2)
             with c1: st.info("Verdict"); st.write(res["Gemini"])
             with c2: st.info("Strategy"); st.write(res["Claude"])
 
-    with tabs[2]:
+    with tabs[2]: # FINDER
         c1, c2 = st.columns(2)
         with c1: target = st.selectbox("I need:", ["Prospects", "2026 SP", "Draft Capital"])
         with c2: offer = st.text_input("Offering:")
         if st.button("Scour League"):
-            st.write(run_gm_analysis(f"Get {target} for {offer}", json.dumps(full_league_data), "Finder")["Gemini"])
+            st.write(run_gm_analysis(f"Find trades to get {target} for {offer}", json.dumps(full_league_data), intel_text, "Finder")["Gemini"])
 
-    with tabs[3]:
+    with tabs[3]: # INTEL (NEW)
+        st.subheader("🕵️ League Intel Network")
+        st.caption("Rumors entered here are read by the AI to improve trade advice.")
+        
+        # Display Intel
+        if intel_text:
+            st.markdown(intel_text)
+        else:
+            st.info("No active rumors.")
+            
+        # Add Intel
+        with st.form("add_intel"):
+            new_rumor = st.text_input("New Rumor/Note:")
+            new_source = st.selectbox("Source Reliability:", ["Confirmed", "High", "Medium", "Sketchy"])
+            if st.form_submit_button("💾 Save Intel"):
+                try:
+                    if not intel_ws: intel_ws = sh.add_worksheet("Intel", 1000, 5); intel_ws.append_row(["Date", "Rumor", "Source"])
+                    intel_ws.append_row([time.strftime("%Y-%m-%d"), new_rumor, new_source])
+                    st.success("Intel Logged!"); time.sleep(1); st.rerun()
+                except: st.error("Failed to save.")
+
+    with tabs[4]: # BLOCK MONITOR
         st.subheader("📋 Living Trade Block")
         try:
             block_ws = sh.worksheet("Trade Block")
             block_records = block_ws.get_all_records()
             if block_records:
                 st.success(f"📂 Database: {len(block_records)} Active Players")
-                df_block = pd.DataFrame(block_records)
-                st.dataframe(df_block, use_container_width=True)
+                st.dataframe(pd.DataFrame(block_records), use_container_width=True)
             else: st.info("Database Empty.")
         except: st.warning("Sheet not ready.")
         
@@ -458,82 +483,78 @@ try:
         st.subheader("📸 Add New Intel")
         up_files = st.file_uploader("Upload Block Screenshots", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
         if up_files and st.button("Calculate Projections & Save"):
-            new_data = analyze_and_save_block(up_files, json.dumps(user_roster), sh)
+            new_data = analyze_and_save_block(up_files, json.dumps(user_roster), intel_text, sh)
             if new_data:
-                st.success(f"✅ Analytics Saved! Refreshing...")
-                time.sleep(2); st.rerun()
+                st.success(f"✅ Analytics Saved! Refreshing..."); time.sleep(2); st.rerun()
 
-    with tabs[4]:
+    with tabs[5]: # LEDGER (FIXED VERTICAL VIEW)
         st.subheader("📊 Roster Matrix")
-        if raw_matrix and len(raw_matrix) > 0:
-            with st.expander("✨ Roster Architect", expanded=False):
-                col_single, col_bulk = st.columns(2)
-                with col_single:
-                    target_team = st.selectbox("Single Team:", TEAM_NAMES, key="sort_single")
-                    if st.button(f"Organize {target_team}"):
-                        headers = [str(c).strip() for c in raw_matrix[0]]
-                        try:
-                            col_idx = headers.index(target_team)
-                            curr = [row[col_idx] for row in raw_matrix[1:] if col_idx < len(row) and row[col_idx].strip()]
-                            sorted_list = organize_roster_ai(curr)
-                            if sorted_list:
-                                for r in range(1, len(raw_matrix)):
-                                    if col_idx < len(raw_matrix[r]): raw_matrix[r][col_idx] = ""
-                                while len(raw_matrix) < len(sorted_list) + 1:
-                                    raw_matrix.append([""] * len(raw_matrix[0]))
-                                for i, item in enumerate(sorted_list):
-                                    raw_matrix[i+1][col_idx] = item
-                                roster_ws.clear(); roster_ws.update(raw_matrix)
-                                st.success(f"✅ Organized!"); time.sleep(1); st.rerun()
-                        except: st.error("Failed.")
-                with col_bulk:
-                    if st.button("🚀 Organize ENTIRE League"):
-                        headers = [str(c).strip() for c in raw_matrix[0]]
-                        prog = st.progress(0)
-                        valid_cols = [(idx, h) for idx, h in enumerate(headers) if h in TEAM_NAMES]
-                        for i, (col_idx, team_name) in enumerate(valid_cols):
-                            curr = [row[col_idx] for row in raw_matrix[1:] if col_idx < len(row) and row[col_idx].strip()]
-                            s_list = organize_roster_ai(curr)
-                            if s_list:
-                                for r in range(1, len(raw_matrix)):
-                                    if col_idx < len(raw_matrix[r]): raw_matrix[r][col_idx] = ""
-                                while len(raw_matrix) < len(s_list) + 1:
-                                    raw_matrix.append([""] * len(raw_matrix[0]))
-                                for k, item in enumerate(s_list):
-                                    raw_matrix[k+1][col_idx] = item
-                            prog.progress((i+1)/len(valid_cols))
-                        roster_ws.clear(); roster_ws.update(raw_matrix)
-                        st.success("✅ League Organized!"); time.sleep(2); st.rerun()
-
-            df = pd.DataFrame(raw_matrix[1:], columns=raw_matrix[0])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # 1. Transform Logic (Horizontal -> Vertical Table)
+        if full_league_data:
+            df_vertical = flatten_roster_to_df(full_league_data)
+            
+            # 2. Filters
+            col_filter, col_sort = st.columns(2)
+            with col_filter:
+                filter_team = st.multiselect("Filter Team:", TEAM_NAMES)
+                filter_cat = st.multiselect("Filter Category:", ["Hitter", "Pitcher", "Unknown"])
+            
+            # 3. Apply Filters
+            if filter_team: df_vertical = df_vertical[df_vertical["Team"].isin(filter_team)]
+            if filter_cat: df_vertical = df_vertical[df_vertical["Category"].isin(filter_cat)]
+            
+            # 4. Display Sortable Table
+            st.dataframe(df_vertical, use_container_width=True, hide_index=True, height=600)
+            st.download_button("📥 Download Sortable Excel", convert_df_to_excel(df_vertical), "Roster_DB.xlsx")
+            
         else: st.warning("⚠️ No data.")
+        
+        # Tools (Organizer)
+        with st.expander("⚙️ Roster Tools"):
+             if st.button("🚀 Organize ENTIRE League"):
+                headers = [str(c).strip() for c in raw_matrix[0]]
+                prog = st.progress(0)
+                valid_cols = [(idx, h) for idx, h in enumerate(headers) if h in TEAM_NAMES]
+                for i, (col_idx, team_name) in enumerate(valid_cols):
+                    curr = [row[col_idx] for row in raw_matrix[1:] if col_idx < len(row) and row[col_idx].strip()]
+                    s_list = organize_roster_ai(curr)
+                    if s_list:
+                        for r in range(1, len(raw_matrix)):
+                            if col_idx < len(raw_matrix[r]): raw_matrix[r][col_idx] = ""
+                        while len(raw_matrix) < len(s_list) + 1:
+                            raw_matrix.append([""] * len(raw_matrix[0]))
+                        for k, item in enumerate(s_list):
+                            raw_matrix[k+1][col_idx] = item
+                    prog.progress((i+1)/len(valid_cols))
+                roster_ws.clear(); roster_ws.update(raw_matrix)
+                st.success("✅ League Organized!"); time.sleep(2); st.rerun()
 
-    # (Tabs 5-9 kept same as previous correct version)
-    with tabs[5]:
+    # (Remaining tabs 6-10 same as before)
+    with tabs[6]: # SCOUTING
         scout_p = st.text_input("Scout Player:", key="scout_q")
         if scout_p:
-            res = run_gm_analysis(f"Full scouting report for {scout_p}", json.dumps(full_league_data), "Scouting")
+            res = run_gm_analysis(f"Full scouting report for {scout_p}", json.dumps(full_league_data), intel_text, "Scouting")
             c1, c2 = st.columns(2)
             with c1: st.info("Gemini"); st.write(res["Gemini"])
             with c2: st.info("Consensus"); st.write(res["GPT"])
 
-    with tabs[6]:
+    with tabs[7]: # SLEEPERS
         if st.button("Identify Breakouts"):
-            res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(full_league_data), "Sleepers")
+            res = run_gm_analysis("Identify 5 players with elite 2026 ZiPS but low Dynasty ECR rankings.", json.dumps(full_league_data), intel_text, "Sleepers")
             st.write(res["Gemini"]); st.write(res["Claude"])
 
-    with tabs[7]:
+    with tabs[8]: # PRIORITY
         if st.button("Generate Targets"):
-            res = run_gm_analysis("Who are the top 5 targets I should move for now?", json.dumps(full_league_data), "Priority")
+            res = run_gm_analysis("Who are the top 5 targets I should move for now?", json.dumps(full_league_data), intel_text, "Priority")
             st.write(res["Gemini"])
 
-    with tabs[8]:
+    with tabs[9]: # PICKS
         if st.button("Evaluate 2026 Class"):
-             res = run_gm_analysis("Analyze 2026 MLB Draft Class strength.", "N/A", "Draft")
+             res = run_gm_analysis("Analyze 2026 MLB Draft Class strength.", "N/A", intel_text, "Draft")
              st.write(res["Gemini"])
 
-    with tabs[9]:
+    with tabs[10]: # HISTORY
         for log in history_ws.col_values(1)[::-1]: st.write(f"🔹 {log}")
 
 except Exception as e: st.error(f"System Offline: {e}")
