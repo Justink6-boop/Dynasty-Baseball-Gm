@@ -21,7 +21,7 @@ def convert_df_to_excel(df):
 
 SHEET_ID = "1-EDI4TfvXtV6RevuPLqo5DKUqZQLlvfF2fKoMDnv33A" 
 
-# --- 2. MASTER LEAGUE LEDGER ---
+# --- 2. MASTER LEAGUE REFERENCE DATA ---
 def get_initial_league():
     return {
         "Witness Protection (Me)": {
@@ -61,7 +61,7 @@ def get_initial_league():
             "Catchers": ["Shea Langeliers", "Logan O'Hoppe", "Jonah Heim", "Keibert Ruiz"],
             "Infielders": ["Alec Burleson (1B, OF)", "Jorge Polanco (2B)", "Manny Machado (3B)", "Dansby Swanson (SS)", "Eugenio Suarez (3B)", "Luke Keaschall (2B)", "Ozzie Albies (2B)", "Triston Casas (1B)", "Ryan O'Hearn (1B, OF)", "Pavin Smith (1B)", "Alec Bohm (3B)", "Oswaldo Cabrera (3B)", "Xander Bogaerts (SS)", "Colson Montgomery (SS)", "Carson Williams (SS)", "Charlie Condon (1B)", "Termarr Johnson (2B)"],
             "Outfielders": ["Teoscar Hernandez", "Steven Kwan", "Jung Hoo Lee", "Lars Nootbaar", "Justin Crawford", "Victor Scott", "Masataka Yoshida (UT)", "Walker Jenkins"],
-            "Pitchers": ["Matthew Boyd", "Noah Cameron", "Sean Manaea", "Luis Severino", "Brady Singer", "Michael Wacha", "Brandon Woodruff", "Jose Alvarado", "Aaron Civale", "Connelly Early", "Kyle Harrison", "Logan Henderson", "Jake Irvin", "Miles Mikolas", "Charlie Morton", "Roki Sasaki", "Jameson Taillon", "Hagen Smith"]
+            "Pitchers": ["Matthew Boyd", "Noah Cameron", "Sean Manaea", "Luis Severino", "Brady Singer", "Michael Wacha", "Brandon Woodruff", "Jose Alvarado", "Aaron Civale", "Connelly Early", "Kyle Harrison", "Logan Henderson", "Jake Irvin", "Miles Mikolas", "Charlie Morton", "Roki Sasaki", "Jameson Taillon", "Haden Smith"]
         },
         "ManBearPuig": {
             "Catchers": ["Samuel Basallo", "William Contreras", "Jimmy Crooks", "Josue Briceno (1B)", "Eduardo Tait"],
@@ -96,7 +96,7 @@ st.title("🧠 Dynasty GM Suite: Executive Terminal")
 if "faab" not in st.session_state: st.session_state.faab = 200.00
 
 try:
-    # A. DATA CONNECTIONS
+    # --- A. DATA CONNECTIONS ---
     gc = get_gspread_client()
     sh = gc.open_by_key(SHEET_ID)
     history_ws = sh.get_worksheet(0)
@@ -105,25 +105,35 @@ try:
     permanent_history = history_ws.col_values(1)
     raw_roster_matrix = roster_ws.get_all_values()
 
-    # Define the export_df for team lists before starting tabs
+    # --- B. PROCESS TEAM LIST (Crucial for Dropdowns) ---
     init_data = get_initial_league()
     flat_data = {team: [p for pos in players.values() if isinstance(pos, list) for p in pos] + players.get("Draft Picks", []) for team, players in init_data.items()}
     export_df = pd.DataFrame.from_dict(flat_data, orient='index').transpose()
     team_list = list(export_df.columns)
 
-    # B. AI CONFIGURATION
+    # --- C. AI CONFIGURATION & BRAIN ---
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
-    # This logic automatically finds the best available 'flash' model to avoid 404s
+    # Select best model
     try:
-        # Try the most stable current name first
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
     except:
-        # Fallback: List all models and pick the first one that supports text generation
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         flash_models = [m for m in available_models if 'flash' in m]
         model_to_use = flash_models[0] if flash_models else available_models[0]
         model = genai.GenerativeModel(model_to_use)
+
+    # AI Shared Function (Defined before use in Tabs)
+    def get_gm_advice(category, user_input=""):
+        context = f"""
+        LIVE_ROSTERS: {raw_roster_matrix}
+        HISTORY: {permanent_history}
+        REFERENCE: {get_initial_league()}
+        METRICS: ZiPS/FanGraphs Dynasty Fit (2026-28 Window)
+        SCORING: 6x6 Category (OPS, QS focus).
+        TASK: {category}
+        """
+        return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Generate Report'}").text
 
     # --- 4. SIDEBAR ---
     with st.sidebar:
@@ -131,7 +141,7 @@ try:
         spent = st.number_input("Log Spending:", min_value=0.0)
         if st.button("Update Budget"): st.session_state.faab -= spent
         st.divider()
-        st.info("💡 Use the 'Transaction Terminal' tab to log trades and roster moves.")
+        st.info("💡 Transactions must be logged in the first tab.")
 
     # --- 5. THE EXECUTIVE SUITE TABS ---
     tabs = st.tabs([
@@ -197,30 +207,43 @@ try:
                         st.rerun()
                     except: st.error("Spelling or Format error.")
 
-    # --- OTHER TABS ---
+    # --- TAB 1: TRADE ANALYSIS ---
     with tabs[1]:
         st.subheader("OOTP-Style Trade Consultant")
         trade_q = st.chat_input("Analyze this trade...")
-        if trade_q: st.markdown(get_gm_advice("Trade Grading", trade_q))
+        if trade_q:
+            st.markdown(get_gm_advice("Trade Grading", trade_q))
 
+    # --- TAB 2: LIVE LEDGER ---
     with tabs[2]:
         st.subheader("Live Database Status")
-        st.download_button(label="📥 Download Template", data=convert_df_to_excel(export_df), file_name="League_Rosters.xlsx")
+        st.download_button(label="📥 Download Excel Template", data=convert_df_to_excel(export_df), file_name="League_Rosters.xlsx")
         st.dataframe(pd.DataFrame(raw_roster_matrix), use_container_width=True)
 
+    # --- TAB 3: TARGETS ---
     with tabs[3]:
-        if st.button("Generate Trade Target List"): st.markdown(get_gm_advice("ZiPS Buy-Lows"))
+        st.subheader("ZiPS Optimized Targets")
+        if st.button("Generate Trade Target List"):
+            st.markdown(get_gm_advice("Priority Trade Candidates"))
 
+    # --- TAB 4: SCOUTING ---
     with tabs[4]:
+        st.subheader("Deep Scouting Report")
         scout_p = st.text_input("Enter Player for Fit Analysis:")
-        if scout_p: st.markdown(get_gm_advice("Scouting Fit Analysis", scout_p))
+        if scout_p:
+            st.markdown(get_gm_advice("Scouting Fit Analysis", scout_p))
 
+    # --- TAB 5: SLEEPERS ---
     with tabs[5]:
-        if st.button("Find Dynasty Sleepers"): st.markdown(get_gm_advice("2026-28 Sleepers"))
+        st.subheader("Dynasty Sleeper Hub")
+        if st.button("Scout Sleepers"):
+            st.markdown(get_gm_advice("2026-28 Sleeper Identification"))
 
+    # --- TAB 6: HISTORY ---
     with tabs[6]:
         st.subheader("Transaction History")
-        for trade in permanent_history[::-1]: st.write(f"✅ {trade}")
+        for trade in permanent_history[::-1]:
+            st.write(f"✅ {trade}")
 
 except Exception as e:
     st.error(f"Executive System Offline: {e}")
