@@ -51,100 +51,7 @@ def clean_ai_matrix(raw_response):
         return None
     except: return None
 
-def parse_horizontal_rosters(matrix):
-    """Maps Row 1 Headers to Columns with Fuzzy Matching."""
-    league_map = {}
-    if not matrix: return league_map
-    
-    headers = [str(cell).strip() for cell in matrix[0]]
-    # Pre-fill map
-    for t in TEAM_NAMES: league_map[t] = []
-
-    for col_idx, header_val in enumerate(headers):
-        # Fuzzy match header against known TEAM_NAMES
-        match = difflib.get_close_matches(header_val, TEAM_NAMES, n=1, cutoff=0.9)
-        if match:
-            team_key = match[0]
-            for row_idx, row in enumerate(matrix[1:]):
-                if col_idx < len(row):
-                    player_val = str(row[col_idx]).strip()
-                    if player_val and not player_val.endswith(':'):
-                        league_map[team_key].append({
-                            "name": player_val,
-                            "row": row_idx + 2, 
-                            "col": col_idx + 1
-                        })
-    return league_map
-
-# --- 3. DETERMINISTIC SWAP ENGINE ---
-def execute_hard_swap(matrix, team_a, players_a, team_b, players_b):
-    """Moves players between columns mathematically (No AI)."""
-    headers = [str(c).strip() for c in matrix[0]]
-    
-    try:
-        match_a = difflib.get_close_matches(team_a, headers, n=1, cutoff=0.8)[0]
-        col_a_idx = headers.index(match_a)
-        
-        match_b = difflib.get_close_matches(team_b, headers, n=1, cutoff=0.8)[0]
-        col_b_idx = headers.index(match_b)
-    except IndexError:
-        return None, f"Column not found for {team_a} or {team_b}"
-
-    def get_col_data(col_idx):
-        return [row[col_idx] if col_idx < len(row) else "" for row in matrix]
-
-    col_a_data = get_col_data(col_a_idx)
-    col_b_data = get_col_data(col_b_idx)
-
-    names_moving_a = [p['name'] for p in players_a]
-    names_moving_b = [p['name'] for p in players_b]
-
-    # Rebuild columns
-    new_col_a = [col_a_data[0]] + [x for x in col_a_data[1:] if x not in names_moving_a and x != ""]
-    new_col_b = [col_b_data[0]] + [x for x in col_b_data[1:] if x not in names_moving_b and x != ""]
-
-    # Swap
-    for p in names_moving_b: new_col_a.append(p)
-    for p in names_moving_a: new_col_b.append(p)
-
-    # Resize Matrix
-    max_len = max(len(matrix), len(new_col_a), len(new_col_b))
-    while len(matrix) < max_len: matrix.append([""] * len(matrix[0]))
-
-    for r in range(max_len):
-        if r < len(new_col_a):
-            while len(matrix[r]) <= col_a_idx: matrix[r].append("")
-            matrix[r][col_a_idx] = new_col_a[r]
-        else:
-             if len(matrix[r]) > col_a_idx: matrix[r][col_a_idx] = ""
-
-        if r < len(new_col_b):
-            while len(matrix[r]) <= col_b_idx: matrix[r].append("")
-            matrix[r][col_b_idx] = new_col_b[r]
-        else:
-             if len(matrix[r]) > col_b_idx: matrix[r][col_b_idx] = ""
-
-    return matrix, "Success"
-
-# --- 4. CLEANUP PROTOCOL ---
-def cleanup_trade_block(sh, players_traded):
-    """Removes traded players from 'Trade Block' worksheet."""
-    try:
-        block_ws = sh.worksheet("Trade Block")
-        block_names = block_ws.col_values(1)
-        removed_count = 0
-        for p_name in players_traded:
-            matches = difflib.get_close_matches(p_name, block_names, n=1, cutoff=0.9)
-            if matches:
-                cell = block_ws.find(matches[0])
-                if cell:
-                    block_ws.delete_rows(cell.row)
-                    removed_count += 1
-                    block_names = block_ws.col_values(1) # Refresh
-        return f"Cleaned {removed_count} from Block."
-    except: return "No Block found."
-
-# --- 5. AI & VISION ENGINE ---
+# --- 3. AI ENGINES (GEN & VISION) ---
 def get_active_model():
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     try:
@@ -164,6 +71,58 @@ def call_openrouter(model_id, persona, prompt):
         )
         return r.json()['choices'][0]['message']['content'] if r.status_code == 200 else f"Error {r.status_code}"
     except: return "Connection Timeout."
+
+def organize_roster_ai(player_list):
+    """
+    Uses AI to sort a raw list of players into positional categories.
+    """
+    model = get_active_model()
+    prompt = f"""
+    You are a Fantasy Baseball Clerk. 
+    Here is a list of players: {player_list}
+    
+    TASK:
+    1. Identify the primary position for each player.
+    2. Group them into two strict lists: 'HITTERS:' and 'PITCHERS:'.
+    3. Within Hitters, sort by field position (C, 1B, 2B, 3B, SS, OF, DH).
+    4. Within Pitchers, sort by (SP, RP).
+    
+    OUTPUT FORMAT:
+    Return a single Python list of strings. 
+    Use the exact headers 'HITTERS:' and 'PITCHERS:' (with the colon).
+    Example: ['HITTERS:', 'Adley Rutschman', 'Gunnar Henderson', 'PITCHERS:', 'Corbin Burnes']
+    """
+    try:
+        response = model.generate_content(prompt).text
+        match = re.search(r"(\[.*\])", response, re.DOTALL)
+        if match:
+            return eval(match.group(1))
+        return None
+    except: return None
+
+# --- 4. LOGIC & PARSING ---
+def parse_horizontal_rosters(matrix):
+    """Maps Row 1 Headers to Columns with Fuzzy Matching."""
+    league_map = {}
+    if not matrix: return league_map
+    
+    headers = [str(cell).strip() for cell in matrix[0]]
+    for t in TEAM_NAMES: league_map[t] = []
+
+    for col_idx, header_val in enumerate(headers):
+        match = difflib.get_close_matches(header_val, TEAM_NAMES, n=1, cutoff=0.9)
+        if match:
+            team_key = match[0]
+            for row_idx, row in enumerate(matrix[1:]):
+                if col_idx < len(row):
+                    player_val = str(row[col_idx]).strip()
+                    if player_val and not player_val.endswith(':'):
+                        league_map[team_key].append({
+                            "name": player_val,
+                            "row": row_idx + 2, 
+                            "col": col_idx + 1
+                        })
+    return league_map
 
 def parse_trade_screenshot(image_file, team_names):
     """Uses Gemini Vision to read trade screenshots."""
@@ -188,7 +147,69 @@ def parse_trade_screenshot(image_file, team_names):
             return ast.literal_eval(clean)
         except Exception as e: return None
 
-# --- 6. ANALYSIS FUNCTIONS ---
+def execute_hard_swap(matrix, team_a, players_a, team_b, players_b):
+    """Moves players between columns mathematically (No AI)."""
+    headers = [str(c).strip() for c in matrix[0]]
+    try:
+        match_a = difflib.get_close_matches(team_a, headers, n=1, cutoff=0.8)[0]
+        col_a_idx = headers.index(match_a)
+        
+        match_b = difflib.get_close_matches(team_b, headers, n=1, cutoff=0.8)[0]
+        col_b_idx = headers.index(match_b)
+    except IndexError:
+        return None, f"Column not found for {team_a} or {team_b}"
+
+    def get_col_data(col_idx):
+        return [row[col_idx] if col_idx < len(row) else "" for row in matrix]
+
+    col_a_data = get_col_data(col_a_idx)
+    col_b_data = get_col_data(col_b_idx)
+
+    names_moving_a = [p['name'] for p in players_a]
+    names_moving_b = [p['name'] for p in players_b]
+
+    new_col_a = [col_a_data[0]] + [x for x in col_a_data[1:] if x not in names_moving_a and x != ""]
+    new_col_b = [col_b_data[0]] + [x for x in col_b_data[1:] if x not in names_moving_b and x != ""]
+
+    for p in names_moving_b: new_col_a.append(p)
+    for p in names_moving_a: new_col_b.append(p)
+
+    max_len = max(len(matrix), len(new_col_a), len(new_col_b))
+    while len(matrix) < max_len: matrix.append([""] * len(matrix[0]))
+
+    for r in range(max_len):
+        if r < len(new_col_a):
+            while len(matrix[r]) <= col_a_idx: matrix[r].append("")
+            matrix[r][col_a_idx] = new_col_a[r]
+        else:
+             if len(matrix[r]) > col_a_idx: matrix[r][col_a_idx] = ""
+
+        if r < len(new_col_b):
+            while len(matrix[r]) <= col_b_idx: matrix[r].append("")
+            matrix[r][col_b_idx] = new_col_b[r]
+        else:
+             if len(matrix[r]) > col_b_idx: matrix[r][col_b_idx] = ""
+
+    return matrix, "Success"
+
+def cleanup_trade_block(sh, players_traded):
+    """Removes traded players from 'Trade Block' worksheet."""
+    try:
+        block_ws = sh.worksheet("Trade Block")
+        block_names = block_ws.col_values(1)
+        removed_count = 0
+        for p_name in players_traded:
+            matches = difflib.get_close_matches(p_name, block_names, n=1, cutoff=0.9)
+            if matches:
+                cell = block_ws.find(matches[0])
+                if cell:
+                    block_ws.delete_rows(cell.row)
+                    removed_count += 1
+                    block_names = block_ws.col_values(1)
+        return f"Cleaned {removed_count} from Block."
+    except: return "No Block found."
+
+# --- 5. ANALYTICS ---
 def run_gm_analysis(query, league_data, task="Trade"):
     mandate = """
     REALISM GATE: Elite Youth > Aging Vets.
@@ -203,36 +224,6 @@ def run_gm_analysis(query, league_data, task="Trade"):
         "GPT": call_openrouter("openai/gpt-4o", "Market Expert.", brief),
         "Claude": call_openrouter("anthropic/claude-3.5-sonnet", "Strategist.", brief)
     }
-    
-def organize_roster_ai(player_list):
-    """
-    Uses AI to sort a raw list of players into positional categories.
-    """
-    model = get_active_model()
-    prompt = f"""
-    You are a Fantasy Baseball Clerk. 
-    Here is a list of players: {player_list}
-    
-    TASK:
-    1. Identify the primary position for each player.
-    2. Group them into two strict lists: 'HITTERS:' and 'PITCHERS:'.
-    3. Within Hitters, sort by field position (C, 1B, 2B, 3B, SS, OF, DH).
-    4. Within Pitchers, sort by (SP, RP).
-    
-    OUTPUT FORMAT:
-    Return a single Python list of strings. 
-    Use the exact headers 'HITTERS:' and 'PITCHERS:' (with the colon).
-    Example: ['HITTERS:', 'Adley Rutschman', 'Gunnar Henderson', 'PITCHERS:', 'Corbin Burnes']
-    """
-    try:
-        response = model.generate_content(prompt).text
-        # Clean the response to get the list
-        match = re.search(r"(\[.*\])", response, re.DOTALL)
-        if match:
-            return eval(match.group(1))
-        return None
-    except Exception as e:
-        return None
 
 def analyze_trade_block_text(block_text, user_roster):
     prompt = f"Trade Block Audit. ROSTER: {user_roster}. BLOCK: {block_text}. Grade fits (A-F)."
@@ -246,7 +237,20 @@ def analyze_trade_block_image(image_file, user_roster):
     with st.spinner("👀 Scanning Block..."):
         return model.generate_content([prompt, img]).text
 
-# --- 7. VERIFICATION DIALOG ---
+def get_fuzzy_matches(input_names, team_players):
+    results = []
+    if not team_players: return [None]
+    ledger_names = [p['name'] for p in team_players]
+    raw_list = [n.strip() for n in input_names.split(",") if n.strip()]
+    for name in raw_list:
+        matches = difflib.get_close_matches(name, ledger_names, n=1, cutoff=0.6)
+        if matches:
+            match_obj = next(p for p in team_players if p['name'] == matches[0])
+            results.append(match_obj)
+        else: results.append(None)
+    return results
+
+# --- 6. UI DIALOGS ---
 @st.dialog("Verify Roster Sync")
 def verify_trade_dialog(team_a, final_a, team_b, final_b, roster_ws, history_ws, raw_matrix, sh):
     st.warning("⚖️ **Identity Verification Required**")
@@ -270,7 +274,6 @@ def verify_trade_dialog(team_a, final_a, team_b, final_b, roster_ws, history_ws,
                     names_b = ", ".join([p['name'] for p in final_b])
                     history_ws.append_row([f"TRADE: {team_a} ↔️ {team_b} | {names_a} for {names_b}"])
                     
-                    # Cleanup
                     all_names = [p['name'] for p in final_a] + [p['name'] for p in final_b]
                     cleanup_status = cleanup_trade_block(sh, all_names)
                     
@@ -280,34 +283,18 @@ def verify_trade_dialog(team_a, final_a, team_b, final_b, roster_ws, history_ws,
                 except Exception as e: st.error(f"API Error: {e}")
             else: st.error(f"Swap Failed: {status}")
 
-# --- 8. FUZZY MATCH HELPERS ---
-def get_fuzzy_matches(input_names, team_players):
-    results = []
-    if not team_players: return [None]
-    ledger_names = [p['name'] for p in team_players]
-    raw_list = [n.strip() for n in input_names.split(",") if n.strip()]
-    for name in raw_list:
-        matches = difflib.get_close_matches(name, ledger_names, n=1, cutoff=0.6)
-        if matches:
-            match_obj = next(p for p in team_players if p['name'] == matches[0])
-            results.append(match_obj)
-        else: results.append(None)
-    return results
-
-# --- 9. MAIN APP UI ---
+# --- 7. MAIN APP UI ---
 st.set_page_config(page_title="GM Master Terminal", layout="wide", page_icon="🏛️")
 st.title("🏛️ Dynasty GM Suite: Master Executive Terminal")
 
 try:
     gc = get_gspread_client()
     sh = gc.open_by_key(SHEET_ID)
-    history_ws, roster_ws = sh.get_worksheet(0), sh.get_worksheet(1)
     
-    # Force Reload Button in Sidebar
-    if st.sidebar.button("🔄 Force Refresh Data"):
-        st.cache_data.clear()
-        st.rerun()
-
+    # ⚠️ CHECK YOUR TAB ORDER HERE. Index 0 = First Tab, 1 = Second Tab
+    history_ws = sh.get_worksheet(0) 
+    roster_ws = sh.get_worksheet(1) 
+    
     try:
         block_ws = sh.worksheet("Trade Block")
         block_data = block_ws.col_values(1)
@@ -335,10 +322,13 @@ try:
                 team_b = st.selectbox("Team B:", TEAM_NAMES, key="man_tb")
                 p_b = st.text_area("Giving:", key="man_pb")
             if st.button("🔥 Verify Manual Trade"):
-                ma = get_fuzzy_matches(p_a, full_league_data[team_a]) if p_a else []
-                mb = get_fuzzy_matches(p_b, full_league_data[team_b]) if p_b else []
-                if None in ma or None in mb: st.error("Player not found.")
-                else: verify_trade_dialog(team_a, ma, team_b, mb, roster_ws, history_ws, raw_matrix, sh)
+                if team_a not in full_league_data or team_b not in full_league_data:
+                    st.error("Team not found in spreadsheet.")
+                else:
+                    ma = get_fuzzy_matches(p_a, full_league_data[team_a]) if p_a else []
+                    mb = get_fuzzy_matches(p_b, full_league_data[team_b]) if p_b else []
+                    if None in ma or None in mb: st.error("Player not found.")
+                    else: verify_trade_dialog(team_a, ma, team_b, mb, roster_ws, history_ws, raw_matrix, sh)
 
         # VISION
         with tab_vis:
@@ -395,64 +385,64 @@ try:
         if up_file and st.button("Analyze Image"):
             st.write(analyze_trade_block_image(up_file, json.dumps(user_roster)))
 
-    # --- TAB 4: LEDGER (With Roster Organizer) ---
+    # TAB 4: LEDGER (BULK SORTING ENABLED)
     with tabs[4]:
         st.subheader("📊 Roster Matrix")
-        
-        # --- NEW: ROSTER ORGANIZER UI ---
-        with st.expander("✨ Roster Architect (Sort by Position)", expanded=False):
-            st.caption("This will reorganize a team's column into HITTERS and PITCHERS sections.")
-            target_team_sort = st.selectbox("Select Team to Organize:", TEAM_NAMES, key="sort_team_sel")
+        if raw_matrix and len(raw_matrix) > 0:
             
-            if st.button(f"Organize {target_team_sort} by Position"):
-                with st.spinner(f"AI is sorting {target_team_sort}'s roster..."):
-                    # 1. Get current players
-                    current_roster = [p['name'] for p in full_league_data[target_team_sort]]
-                    
-                    # 2. Send to AI for sorting
-                    sorted_list = organize_roster_ai(current_roster)
-                    
-                    if sorted_list:
-                        # 3. Reconstruct the Matrix Column
-                        # Find the column index
+            # --- ROSTER ARCHITECT UI ---
+            with st.expander("✨ Roster Architect", expanded=False):
+                col_single, col_bulk = st.columns(2)
+                
+                with col_single:
+                    st.markdown("#### Single Team")
+                    target_team = st.selectbox("Team:", TEAM_NAMES, key="sort_single")
+                    if st.button(f"Organize {target_team}"):
                         headers = [str(c).strip() for c in raw_matrix[0]]
                         try:
-                            col_idx = headers.index(target_team_sort)
-                            
-                            # Clear the old column data (keep header)
-                            for r in range(1, len(raw_matrix)):
-                                if col_idx < len(raw_matrix[r]):
-                                    raw_matrix[r][col_idx] = ""
-                            
-                            # Write the new sorted list
-                            # Extend matrix if sorted list is longer than current sheet
-                            while len(raw_matrix) < len(sorted_list) + 1:
-                                raw_matrix.append([""] * len(raw_matrix[0]))
-                                
-                            for i, item in enumerate(sorted_list):
-                                raw_matrix[i+1][col_idx] = item
-                                
-                            # Update Google Sheet
-                            roster_ws.clear()
-                            roster_ws.update(raw_matrix)
-                            st.success(f"✅ {target_team_sort} has been organized!")
-                            time.sleep(1)
-                            st.rerun()
-                            
-                        except ValueError:
-                            st.error("Team column not found.")
-                    else:
-                        st.error("AI failed to sort the roster.")
+                            col_idx = headers.index(target_team)
+                            current_roster = [row[col_idx] for row in raw_matrix[1:] if col_idx < len(row) and row[col_idx].strip()]
+                            sorted_list = organize_roster_ai(current_roster)
+                            if sorted_list:
+                                for r in range(1, len(raw_matrix)):
+                                    if col_idx < len(raw_matrix[r]): raw_matrix[r][col_idx] = ""
+                                while len(raw_matrix) < len(sorted_list) + 1:
+                                    raw_matrix.append([""] * len(raw_matrix[0]))
+                                for i, item in enumerate(sorted_list):
+                                    raw_matrix[i+1][col_idx] = item
+                                roster_ws.clear(); roster_ws.update(raw_matrix)
+                                st.success(f"✅ {target_team} organized!"); time.sleep(1); st.rerun()
+                        except: st.error("Failed to sort.")
 
-        # --- EXISTING DISPLAY LOGIC ---
-        if raw_matrix and len(raw_matrix) > 0:
+                with col_bulk:
+                    st.markdown("#### Entire League")
+                    if st.button("🚀 Organize EVERY Team (Progress Bar)"):
+                        headers = [str(c).strip() for c in raw_matrix[0]]
+                        prog = st.progress(0); status = st.empty()
+                        valid_cols = [(idx, h) for idx, h in enumerate(headers) if h in TEAM_NAMES]
+                        for i, (col_idx, team_name) in enumerate(valid_cols):
+                            status.text(f"Sorting {team_name}...")
+                            curr = [row[col_idx] for row in raw_matrix[1:] if col_idx < len(row) and row[col_idx].strip()]
+                            s_list = organize_roster_ai(curr)
+                            if s_list:
+                                for r in range(1, len(raw_matrix)):
+                                    if col_idx < len(raw_matrix[r]): raw_matrix[r][col_idx] = ""
+                                while len(raw_matrix) < len(s_list) + 1:
+                                    raw_matrix.append([""] * len(raw_matrix[0]))
+                                for k, item in enumerate(s_list):
+                                    raw_matrix[k+1][col_idx] = item
+                            prog.progress((i+1)/len(valid_cols))
+                        status.text("Updating Sheets..."); roster_ws.clear(); roster_ws.update(raw_matrix)
+                        st.success("✅ League Organized!"); time.sleep(2); st.rerun()
+
+            # DATAFRAME DISPLAY
             headers = raw_matrix[0]
             data = raw_matrix[1:]
             df = pd.DataFrame(data, columns=headers)
             st.dataframe(df, use_container_width=True, hide_index=True)
-            st.download_button("📥 Export Excel", convert_df_to_excel(df), "Rosters.xlsx")
+            st.download_button("📥 Excel", convert_df_to_excel(df), "Rosters.xlsx")
         else:
-            st.warning("⚠️ No data found. (Check Sheet Index in Code)")
+            st.warning("⚠️ No data. Check sheet Index (0 vs 1).")
 
     # TAB 5: SCOUTING
     with tabs[5]:
