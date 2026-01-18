@@ -60,7 +60,6 @@ def flatten_roster_to_df(league_data):
                 continue
             
             # Simple heuristic for position if not explicitly stored
-            # (In a real DB, we'd store pos, but here we infer or leave blank for sorting)
             flat_data.append({
                 "Team": team,
                 "Player": name,
@@ -280,7 +279,10 @@ def run_gm_analysis(query, league_data, intel_data, task="Trade"):
     }
 
 def analyze_and_save_block(image_files, user_roster, intel_data, sh):
-    """Extracts, Grades, and Saves to Trade Block with Intel Awareness."""
+    """
+    Extracts, Grades, and Saves to Trade Block with Intel Awareness.
+    *FIXED* to ensure Grade is always generated.
+    """
     model = get_active_model()
     prompt = f"""
     You are an Expert Dynasty GM. 
@@ -289,36 +291,50 @@ def analyze_and_save_block(image_files, user_roster, intel_data, sh):
     MY GOAL: Win in 2027 (Retooling).
     
     TASK:
-    1. Extract ALL players. Expand abbreviations.
-    2. "Gap Analysis":
-       - 'Impact_Pct': % scoring increase.
-       - 'Outlook_Shift': Trajectory change.
-       - 'Verdict': PURSUE or PASS.
-       - 'Analysis': Reasoning.
+    Analyze these screenshots. For EVERY player found, generate a JSON object with these EXACT keys:
     
-    OUTPUT: JSON list of dicts.
+    1. "Team": (String) Name of the team trading the player.
+    2. "Player": (String) Full name (expand abbreviations).
+    3. "Position": (String) Primary position.
+    4. "Grade": (String) "A+", "A", "B", "C", "D", or "F". (Based on Dynasty Value & fit).
+    5. "Verdict": (String) "PURSUE", "MONITOR", or "PASS".
+    6. "Impact_Pct": (String) Estimated % scoring boost (e.g. "+5%").
+    7. "Outlook_Shift": (String) e.g. "None" or "Rebuilder -> Contender".
+    8. "Analysis": (String) 1 sentence reasoning.
+    
+    CRITICAL: Do not skip the "Grade" field. Return ONLY the JSON list.
     """
     
     content = [prompt]
     for img_file in image_files: content.append(Image.open(img_file))
         
-    with st.spinner(f"👀 Calculating Analytics..."):
+    with st.spinner(f"👀 Calculating Analytics & Grades..."):
         try:
             response = model.generate_content(content).text
             clean_json = response.replace("```json", "").replace("```", "").strip()
             match = re.search(r"(\[.*\])", clean_json, re.DOTALL)
             if match:
                 data = json.loads(match.group(1))
-                try: block_ws = sh.worksheet("Trade Block")
-                except: block_ws = sh.add_worksheet("Trade Block", 1000, 10); block_ws.append_row(["Team", "Player", "Position", "Grade", "Verdict", "Impact %", "Outlook Shift", "Analysis", "Timestamp"])
+                try: 
+                    block_ws = sh.worksheet("Trade Block")
+                except: 
+                    # Auto-create with correct headers if missing
+                    block_ws = sh.add_worksheet("Trade Block", 1000, 10)
+                    block_ws.append_row(["Team", "Player", "Position", "Grade", "Verdict", "Impact %", "Outlook Shift", "Analysis", "Timestamp"])
                 
                 timestamp = time.strftime("%Y-%m-%d %H:%M")
                 rows = []
                 for entry in data:
                     rows.append([
-                        entry.get("Team", "Unknown"), entry.get("Player", "Unknown"), entry.get("Position", "?"),
-                        entry.get("Grade", "N/A"), entry.get("Verdict", "N/A"), entry.get("Impact_Pct", "0%"),
-                        entry.get("Outlook_Shift", "-"), entry.get("Analysis", ""), timestamp
+                        entry.get("Team", "Unknown"), 
+                        entry.get("Player", "Unknown"), 
+                        entry.get("Position", "?"),
+                        entry.get("Grade", "N/A"),
+                        entry.get("Verdict", "N/A"), 
+                        entry.get("Impact_Pct", "0%"),
+                        entry.get("Outlook_Shift", "-"), 
+                        entry.get("Analysis", ""), 
+                        timestamp
                     ])
                 block_ws.append_rows(rows)
                 return data 
@@ -371,7 +387,6 @@ try:
     try:
         intel_ws = sh.worksheet("Intel")
         intel_data_raw = intel_ws.get_all_values()
-        # Convert to a text blob for the AI
         intel_text = "\n".join([f"- {row[0]}: {row[1]}" for row in intel_data_raw[1:] if len(row) > 1])
     except:
         intel_text = ""
@@ -447,17 +462,10 @@ try:
         if st.button("Scour League"):
             st.write(run_gm_analysis(f"Find trades to get {target} for {offer}", json.dumps(full_league_data), intel_text, "Finder")["Gemini"])
 
-    with tabs[3]: # INTEL (NEW)
+    with tabs[3]: # INTEL
         st.subheader("🕵️ League Intel Network")
-        st.caption("Rumors entered here are read by the AI to improve trade advice.")
-        
-        # Display Intel
-        if intel_text:
-            st.markdown(intel_text)
-        else:
-            st.info("No active rumors.")
-            
-        # Add Intel
+        if intel_text: st.markdown(intel_text)
+        else: st.info("No active rumors.")
         with st.form("add_intel"):
             new_rumor = st.text_input("New Rumor/Note:")
             new_source = st.selectbox("Source Reliability:", ["Confirmed", "High", "Medium", "Sketchy"])
@@ -468,8 +476,22 @@ try:
                     st.success("Intel Logged!"); time.sleep(1); st.rerun()
                 except: st.error("Failed to save.")
 
-    with tabs[4]: # BLOCK MONITOR
+    with tabs[4]: # BLOCK MONITOR (WITH RESET BUTTON)
         st.subheader("📋 Living Trade Block")
+        
+        # --- EMERGENCY RESET BUTTON ---
+        with st.expander("⚠️ Repair Database Headers"):
+            st.caption("Click this if your columns look messed up. It will wipe the sheet and reset headers.")
+            if st.button("🧨 Factory Reset Trade Block Sheet"):
+                try:
+                    try: sh.del_worksheet(sh.worksheet("Trade Block"))
+                    except: pass
+                    new_ws = sh.add_worksheet("Trade Block", 1000, 20)
+                    new_ws.append_row(["Team", "Player", "Position", "Grade", "Verdict", "Impact %", "Outlook Shift", "Analysis", "Timestamp"])
+                    st.success("✅ Sheet Reset! Refreshing..."); time.sleep(2); st.rerun()
+                except Exception as e: st.error(f"Reset Failed: {e}")
+        # ------------------------------
+
         try:
             block_ws = sh.worksheet("Trade Block")
             block_records = block_ws.get_all_records()
@@ -477,7 +499,7 @@ try:
                 st.success(f"📂 Database: {len(block_records)} Active Players")
                 st.dataframe(pd.DataFrame(block_records), use_container_width=True)
             else: st.info("Database Empty.")
-        except: st.warning("Sheet not ready.")
+        except: st.warning("Sheet not ready (Use Reset Button above if needed).")
         
         st.divider()
         st.subheader("📸 Add New Intel")
@@ -487,30 +509,19 @@ try:
             if new_data:
                 st.success(f"✅ Analytics Saved! Refreshing..."); time.sleep(2); st.rerun()
 
-    with tabs[5]: # LEDGER (FIXED VERTICAL VIEW)
+    with tabs[5]: # LEDGER
         st.subheader("📊 Roster Matrix")
-        
-        # 1. Transform Logic (Horizontal -> Vertical Table)
         if full_league_data:
             df_vertical = flatten_roster_to_df(full_league_data)
-            
-            # 2. Filters
             col_filter, col_sort = st.columns(2)
             with col_filter:
                 filter_team = st.multiselect("Filter Team:", TEAM_NAMES)
                 filter_cat = st.multiselect("Filter Category:", ["Hitter", "Pitcher", "Unknown"])
-            
-            # 3. Apply Filters
             if filter_team: df_vertical = df_vertical[df_vertical["Team"].isin(filter_team)]
             if filter_cat: df_vertical = df_vertical[df_vertical["Category"].isin(filter_cat)]
-            
-            # 4. Display Sortable Table
             st.dataframe(df_vertical, use_container_width=True, hide_index=True, height=600)
             st.download_button("📥 Download Sortable Excel", convert_df_to_excel(df_vertical), "Roster_DB.xlsx")
-            
         else: st.warning("⚠️ No data.")
-        
-        # Tools (Organizer)
         with st.expander("⚙️ Roster Tools"):
              if st.button("🚀 Organize ENTIRE League"):
                 headers = [str(c).strip() for c in raw_matrix[0]]
@@ -530,7 +541,6 @@ try:
                 roster_ws.clear(); roster_ws.update(raw_matrix)
                 st.success("✅ League Organized!"); time.sleep(2); st.rerun()
 
-    # (Remaining tabs 6-10 same as before)
     with tabs[6]: # SCOUTING
         scout_p = st.text_input("Scout Player:", key="scout_q")
         if scout_p:
