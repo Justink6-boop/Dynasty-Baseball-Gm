@@ -111,29 +111,30 @@ try:
     export_df = pd.DataFrame.from_dict(flat_data, orient='index').transpose()
     team_list = list(export_df.columns)
 
-    # --- C. AI CONFIGURATION & BRAIN ---
+    # --- C. AI CONFIGURATION & UNIVERSAL BRAIN ---
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
-    try:
-        model = genai.GenerativeModel('gemini-3-flash')
-    except Exception:
-        try:
-            model = genai.GenerativeModel('gemini-2.5-flash')
-        except Exception:
-            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            flash_models = [m for m in available_models if 'flash' in m]
-            model_to_use = flash_models[0] if flash_models else available_models[0]
-            model = genai.GenerativeModel(model_to_use)
+    # Discovery Loop
+    models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    best_model = None
+    for v in ['gemini-3-flash', 'gemini-2.5-flash', 'gemini-1.5-flash', 'flash']:
+        match = [m for m in models if v in m]
+        if match:
+            best_model = match[0]
+            break
+    
+    model = genai.GenerativeModel(best_model if best_model else models[0])
 
-    # SHARED GM BRAIN (MUST BE DEFINED BEFORE TABS)
+    # SHARED ADVICE FUNCTION
     def get_gm_advice(category, user_input=""):
         context = f"""
         LIVE_ROSTERS: {raw_roster_matrix}
         HISTORY: {permanent_history}
+        REFERENCE: {get_initial_league()}
         METRICS: ZiPS/FanGraphs Dynasty Fit (2026-28 Window)
         TASK: {category}
         """
-        return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Generate Report'}").text
+        return model.generate_content(f"{context}\nInput: {user_input if user_input else 'Report'}").text
 
     # --- 4. SIDEBAR ---
     with st.sidebar:
@@ -173,7 +174,7 @@ try:
                     st.error("Select different teams.")
                 else:
                     with st.spinner("Processing trade..."):
-                        prompt = f"DATA: {raw_roster_matrix}\nACTION: Move {players_out} FROM {team_a} TO {team_b}. Move {players_in} FROM {team_b} TO {team_a}. Return ONLY Python list of lists."
+                        prompt = f"DATA: {raw_roster_matrix}\nACTION: Move {players_out} FROM {team_a} TO {team_b}. Move {players_in} FROM {team_b} TO {team_a}. Return ONLY Python list."
                         response = model.generate_content(prompt).text
                         clean = response.replace("```python", "").replace("```", "").strip()
                         try:
@@ -195,7 +196,7 @@ try:
             
             if st.button("Submit Waiver Move"):
                 with st.spinner("Updating..."):
-                    prompt = f"DATA: {raw_roster_matrix}\nACTION: {act} {p_name} to/from {t_team}. Return ONLY Python list of lists."
+                    prompt = f"DATA: {raw_roster_matrix}\nACTION: {act} {p_name} to/from {t_team}. Return ONLY Python list."
                     response = model.generate_content(prompt).text
                     clean = response.replace("```python", "").replace("```", "").strip()
                     try:
@@ -207,41 +208,32 @@ try:
                         st.rerun()
                     except: st.error("Spelling or Format error.")
 
-    # --- TAB 1: TRADE ANALYSIS ---
     with tabs[1]:
-        st.subheader("Trade Grading (ZiPS & FanGraphs Context)")
-        trade_grade = st.chat_input("Analyze a trade or get suggestions...")
+        st.subheader("Trade Grading (ZiPS & FanGraphs)")
+        trade_grade = st.chat_input("Analyze a trade...")
         if trade_grade:
             st.markdown(get_gm_advice("Trade Negotiation & Grading", trade_grade))
 
-    # --- TAB 2: LIVE LEDGER ---
     with tabs[2]:
-        st.subheader("Live Database Status")
-        st.download_button(label="📥 Download Template", data=convert_df_to_excel(export_df), file_name="League_Rosters.xlsx")
+        st.subheader("Current Database Status")
+        st.download_button(label="📥 Download Template", data=convert_df_to_excel(export_df), file_name="Rosters.xlsx")
         st.dataframe(pd.DataFrame(raw_roster_matrix), use_container_width=True)
 
-    # --- TAB 3: TARGETS ---
     with tabs[3]:
-        st.subheader("ZiPS Buy-Lows")
-        if st.button("Generate Trade Target List"):
+        if st.button("Identify ZiPS Buy-Lows"):
             st.markdown(get_gm_advice("Priority Trade Candidates"))
 
-    # --- TAB 4: SCOUTING ---
     with tabs[4]:
-        st.subheader("Fit & Scouting Report")
-        scout_p = st.text_input("Enter Player for Fit Analysis:")
+        scout_p = st.text_input("Enter Player Name for Scouting:")
         if scout_p:
             st.markdown(get_gm_advice("Scouting Fit Analysis", scout_p))
 
-    # --- TAB 5: SLEEPERS ---
     with tabs[5]:
-        st.subheader("Dynasty Sleeper Hub")
-        if st.button("Scout Sleepers"):
+        if st.button("Scout Dynasty Sleepers"):
             st.markdown(get_gm_advice("2026-28 Sleeper Identification"))
 
-    # --- TAB 6: HISTORY ---
     with tabs[6]:
-        st.subheader("Transaction History")
+        st.subheader("History Log")
         for trade in permanent_history[::-1]:
             st.write(f"✅ {trade}")
 
